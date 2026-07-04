@@ -39,7 +39,7 @@ const
   COL_STATUS    = LightGray;
 
   MAX_ENEMIES = 4;
-  TICK_ENEMY  = 6;
+  TICK_ENEMY  = 2;
 
   { Map centred: screen col = OFS_X + world_x, screen row = world_y }
   OFS_X = 20;
@@ -358,7 +358,7 @@ begin
     begin
       ApplyGravity;
       DrawEntities;
-      Delay(50);
+      Delay(20);
     end;
 
   until GameOver or Won;
