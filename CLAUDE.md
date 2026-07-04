@@ -128,11 +128,17 @@ retro-game-stream/
   CLAUDE.md                        ← this file
   docs/
     brainstorm/                    ← design notes per game candidate
-      corporate-ladder/            ← current target game
+      corporate-ladder/            ← current target game design
     decisions/                     ← Architecture Decision Records
     standards/                     ← project standards
     course/                        ← instructor-facing course materials
-  games/                           ← one subdirectory per game trial build
+  games/
+    corporate-ladder/              ← trial build of the current target game
+      build/                       ← build logs and manifest
+      public/                      ← browser play page
+      src/                         ← Pascal source files
+      src-baseline/                ← vibe-code baseline source (Module 0)
+      tests/                       ← acceptance tests
 ```
 
 ---

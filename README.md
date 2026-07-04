@@ -74,12 +74,18 @@ Vibe coding minimises `T_generation` but inflates the downstream terms. SDD inve
 ```
 retro-game-stream/
   docs/
-    brainstorm/           — raw design notes per game candidate
-      corporate-ladder/   — current target game design
-    decisions/            — Architecture Decision Records
-    standards/            — project standards (ADR format, etc.)
-    course/               — instructor-facing course materials
-  games/                  — one directory per game trial build
+    brainstorm/                   — raw design notes per game candidate
+      corporate-ladder/           — current target game design
+    decisions/                    — Architecture Decision Records
+    standards/                    — project standards (ADR format, etc.)
+    course/                       — instructor-facing course materials
+  games/
+    corporate-ladder/             — trial build of the current target game
+      build/                      — build logs and manifest
+      public/                     — browser play page
+      src/                        — Pascal source files
+      src-baseline/               — vibe-code baseline source (Module 0)
+      tests/                      — acceptance tests
 ```
 
 ---
