@@ -57,7 +57,11 @@ Use when any of the following apply: the procedure has parameters whose purpose 
     P.X and P.Y must be within world bounds.
 
   Side effects:
-    None. Rendering is the caller's responsibility. }
+    None. Rendering is the caller's responsibility.
+
+  Errors:
+    [caller] Destination out of bounds or blocked: returns False,
+             P is unchanged. }
 function MovePlayer(const W: TWorld; var P: TPlayer;
                     Dir: TDirection): Boolean;
 ```
@@ -73,7 +77,7 @@ Fields always appear in this order; omit fields that do not apply:
 5. **Preconditions** — what the caller must guarantee (when non-trivial)
 6. **Postconditions** — what will be true after the call (when non-trivial and not captured by Returns)
 7. **Side effects** — global state modified, screen output written, files opened/closed (mandatory if any exist)
-8. **Error behaviour** — what happens and what is returned on failure; IOResult implications (mandatory for procedures that do I/O)
+8. **Errors** — one labelled entry per error condition, classified as `[caller]`, `[internal]`, or `[fatal]` (mandatory for any procedure that can fail or does I/O)
 9. **Example** — a short call sequence (mandatory for "tool procedures" — public entry points that are the primary way a unit is used)
 
 ---
@@ -163,14 +167,53 @@ List every observable effect beyond the return value and `var` parameters: scree
 
 If there are no side effects, write `{ Side effects: none. }` only when a caller might reasonably expect some (e.g. a procedure called `DrawWorld` — the caller knows it draws, so this field is redundant and should be omitted).
 
-### Error behaviour
+### Errors
 
-Mandatory for any procedure that does file I/O or can fail.
+Mandatory for any procedure or function that can fail, does file I/O, or reaches a state from which it cannot recover. Use one labelled entry per distinct error condition, classified by what the **caller** must do about it.
+
+Three classes:
+
+| Class | Label | Meaning |
+| --- | --- | --- |
+| Caller must handle | `[caller]` | The procedure signals failure via its return value or an `errorMsg` parameter; the caller is expected to check and act |
+| Internally handled | `[internal]` | The error is detected and absorbed inside the procedure (e.g. `IOResult` consumed, a default applied); the caller receives no signal and needs to do nothing |
+| Fatal / unrecoverable | `[fatal]` | The procedure calls `Halt`; the caller cannot intercept this |
+
+Format: one line per condition — `[class] <condition>: <what happens>`.
 
 ```pascal
+{ Errors:
+    [caller]   File not found or access denied: returns False,
+               sets errorMsg to a message naming the file.
+    [internal] IOResult is consumed before returning; caller does
+               not need to check it.
+    [fatal]    World dimensions exceed MAX_WORLD_SIZE: Halt(99)
+               with a message identifying the bad value. }
+function LoadWorld(const fileName: String;
+                   var W: TWorld;
+                   var errorMsg: String): Boolean;
+```
+
+Rules:
+
+- Every `[caller]` entry must name the return value or out-parameter that carries the signal
+- Every `[fatal]` entry must match a corresponding `[fatal]` rule in [error-handling.md](error-handling.md) §4
+- `[internal]` entries are written when a caller might reasonably expect to need to handle an error themselves (e.g. `IOResult` after file I/O) — omit when there is no realistic chance of confusion
+- If a procedure has no error conditions at all, omit the `Errors:` field entirely — do not write `Errors: none`
+
+Bad/good contrast:
+
+```pascal
+{ Bad — unclassified, caller cannot tell what action is required }
 { Error behaviour:
     Returns False and sets errorMsg if the file cannot be opened.
-    IOResult is consumed internally; the caller does not need to check it. }
+    IOResult is consumed internally. }
+
+{ Good — each condition is classified }
+{ Errors:
+    [caller]   File not found or access denied: returns False,
+               sets errorMsg to a message naming the file.
+    [internal] IOResult is consumed before returning. }
 ```
 
 ### Example
@@ -284,7 +327,7 @@ Before committing a unit:
 - [ ] Every exported procedure and function has at least a summary comment
 - [ ] Every function has a `Returns:` field
 - [ ] Every exported type has a comment stating its role or invariant
-- [ ] Any procedure with file I/O has an `Error behaviour:` field
+- [ ] Any procedure that can fail or does I/O has an `Errors:` field with every condition classified as `[caller]`, `[internal]`, or `[fatal]`
 - [ ] Any procedure with side effects (screen output, global mutation) has a `Side effects:` field
 - [ ] Primary entry-point procedures have an `Example:` field
 - [ ] No comment repeats information already in the type signature
