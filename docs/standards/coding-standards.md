@@ -111,23 +111,9 @@ Keep the `interface` section minimal: export only what other units genuinely nee
 
 ## 5. Procedure and function headers
 
-Every exported procedure and function must have a header comment immediately above its declaration in the **interface** section:
+All exported procedures, functions, types, and units must carry structured documentation comments. The full format specification — field order, mandatory fields, examples — is in [documentation-standards.md](documentation-standards.md).
 
-```pascal
-{ Draws the current world state to the screen at the given offset.
-  Does not move the cursor after drawing.
-  Precondition: W has been initialised via InitWorld. }
-procedure DrawWorld(const W: TWorld; offsetX, offsetY: Integer);
-```
-
-Private (implementation-only) procedures need a header comment only when the purpose is not immediately obvious from the name and parameters.
-
-Rules:
-- First sentence: what it does (one line)
-- Second sentence (if needed): what it does NOT do, or a side-effect warning
-- `Precondition:` line if there is a non-obvious caller obligation
-- No `Parameters:` or `Returns:` sections — the signature already carries that information
-- No parameter types repeated in the comment
+Quick rule: every exported procedure or function needs at minimum a one-sentence summary; every function also needs a `Returns:` field. Private procedures need a comment only when the purpose is not obvious from the name and signature.
 
 ---
 

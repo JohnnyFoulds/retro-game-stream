@@ -11,6 +11,7 @@ This file is the operating guide for AI assistance on this project. Read it befo
 | Architecture Decision Records | [docs/standards/adr.md](docs/standards/adr.md) |
 | Git and source control | [docs/standards/git-standard.md](docs/standards/git-standard.md) |
 | Pascal coding style | [docs/standards/coding-standards.md](docs/standards/coding-standards.md) |
+| Inline documentation | [docs/standards/documentation-standards.md](docs/standards/documentation-standards.md) |
 | Error handling | [docs/standards/error-handling.md](docs/standards/error-handling.md) |
 | Build | [docs/standards/build-standard.md](docs/standards/build-standard.md) |
 | SDD (instructor reference) | [docs/standards/sdd-instructor-reference.md](docs/standards/sdd-instructor-reference.md) |
