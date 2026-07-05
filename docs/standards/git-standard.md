@@ -8,14 +8,13 @@ This document defines branching, commit, and code-review conventions for this re
 
 ## 1. Branches
 
-Two long-lived branches:
+One long-lived branch:
 
 | Branch | Purpose |
 | --- | --- |
 | `master` | Published, reviewed state. Always buildable. |
-| `development` | Integration branch. Short-lived feature branches merge here first. |
 
-Short-lived branches branch from `development` and follow the naming convention:
+Short-lived branches branch from `master` and follow the naming convention:
 
 ```
 <type>/<short-description>
@@ -37,8 +36,6 @@ feat/r007-dollar-collection
 fix/r004-gravity-off-by-one
 docs/traceability-matrix-update
 ```
-
-Hotfixes branch from `master` and merge back into both `master` and `development`.
 
 ---
 
@@ -114,7 +111,7 @@ Tests: passed
 ## 3. Merge / pull requests
 
 - PRs must be small and focused — one requirement or one logical change per PR
-- The CI build (compile + tests) must pass before requesting review
+- The build (compile + tests) must pass before requesting review
 - PR description must include:
   - Summary of what changed and why (one paragraph)
   - Linked requirement ID(s)
