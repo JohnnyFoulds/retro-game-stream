@@ -1,0 +1,26 @@
+{
+  "version": "0.2",
+  "language": "en-GB",
+  "words": [
+    "println",
+    "internalise",
+    "finalise",
+    "initialise",
+    "normalise",
+    "recognise",
+    "organise",
+    "analysed",
+    "behaviour",
+    "colour",
+    "labelled",
+    "modelling",
+    "travelling",
+    "artefact",
+    "programme"
+  ],
+  "ignorePaths": [
+    "games/corporate-ladder/src/**",
+    "games/corporate-ladder/src-baseline/**",
+    "games/corporate-ladder/build/**"
+  ]
+}

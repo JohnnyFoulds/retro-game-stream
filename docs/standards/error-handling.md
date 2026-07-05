@@ -6,6 +6,120 @@ This document defines how errors are detected, classified, reported, propagated,
 
 ---
 
+## If you are coming from a language with try/catch/except
+
+Python, Java, C#, JavaScript, and most modern languages handle errors with structured exception handling:
+
+```python
+# Python — the modern pattern
+try:
+    world = load_world("level1.dat")
+except FileNotFoundError as e:
+    print(f"Cannot load level: {e}")
+    sys.exit(1)
+```
+
+```java
+// Java — same idea
+try {
+    World world = loadWorld("level1.dat");
+} catch (IOException e) {
+    System.err.println("Cannot load level: " + e.getMessage());
+    System.exit(1);
+}
+```
+
+**Turbo Pascal 7 has none of this.** There is no `try`, no `except`, no `raise`, no exception object, no stack unwinding. TP7 was released in 1992 — structured exception handling did not arrive in Pascal until Delphi 2 (1996).
+
+This is not a limitation to work around. It is a different mental model to learn. The table below maps the concepts directly:
+
+| Modern concept | TP7 equivalent | Notes |
+| --- | --- | --- |
+| `try` block | The procedure body itself | Every procedure is implicitly "guarded" by its return value |
+| `raise SomeError(msg)` | `errorMsg := msg; Exit;` with return value set to `False` | The caller checks the return value instead of catching |
+| `except FileNotFoundError` | `if IOResult <> 0 then` | Specific to I/O; checked immediately after `{$I+}` |
+| `except Exception as e` | `if not SomeProc(..., msg) then` | The `msg` parameter carries the same information as `e.message` |
+| `finally` | Explicit cleanup before every `Exit` | Must be done manually — there is no guaranteed teardown |
+| Unhandled exception → crash | `Halt(exitCode)` | Used for programmer errors and impossible states |
+| Re-raise / exception chaining | Pass `errorMsg` up the call stack unchanged | The message accumulates context as it propagates |
+
+### The practical translation
+
+A Python function that raises an exception and a TP7 function that returns `False` are solving the same problem differently. The Python version:
+
+```python
+def load_world(filename: str) -> World:
+    try:
+        with open(filename, "rb") as f:
+            return World.from_bytes(f.read())
+    except FileNotFoundError:
+        raise WorldLoadError(f"World file '{filename}' not found")
+    except PermissionError:
+        raise WorldLoadError(f"Cannot read world file '{filename}': access denied")
+```
+
+The TP7 equivalent:
+
+```pascal
+function LoadWorld(const fileName: String;
+                   var W: TWorld;
+                   var errorMsg: String): Boolean;
+var
+  f     : File of TWorldRecord;
+  ioErr : Integer;
+begin
+  LoadWorld := False;           { assume failure until proven otherwise }
+  {$I-}
+  Assign(f, fileName);
+  Reset(f);
+  {$I+}
+  ioErr := IOResult;            { equivalent to: except <any I/O error> }
+  if ioErr = 2 then             { FileNotFoundError equivalent }
+  begin
+    errorMsg := 'World file "' + fileName + '" not found';
+    Exit;
+  end;
+  if ioErr <> 0 then            { PermissionError / other I/O error equivalent }
+  begin
+    errorMsg := 'Cannot read world file "' + fileName +
+                '" (DOS error ' + IntToStr(ioErr) + ')';
+    Exit;
+  end;
+  Read(f, W.Data);
+  Close(f);
+  LoadWorld := True;
+  errorMsg := '';
+end;
+```
+
+The caller in Python checks by catching; the caller in TP7 checks by inspecting the return value:
+
+```python
+# Python caller
+try:
+    world = load_world("level1.dat")
+except WorldLoadError as e:
+    print(f"Fatal: {e}")
+    sys.exit(1)
+```
+
+```pascal
+{ TP7 caller — structurally identical, different syntax }
+if not LoadWorld('LEVEL1.DAT', world, msg) then
+begin
+  WriteLn('Fatal: ', msg);
+  Halt(1);
+end;
+```
+
+### The key discipline difference
+
+In Python, forgetting to catch an exception still surfaces the error — it propagates up and eventually crashes the program with a traceback. In TP7, forgetting to check a `Boolean` return value silently continues with corrupted state. **The burden is entirely on the caller.**
+
+This is the most important thing to internalise: **in TP7, unchecked errors are silent**. The checklist in §9 exists precisely to catch these at review time.
+
+---
+
 ## 1. Categories of error
 
 Every error belongs to exactly one of three categories. The category determines how the error is handled and what the caller is expected to do.
