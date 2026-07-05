@@ -13,6 +13,8 @@ This file is the operating guide for AI assistance on this project. Read it befo
 | Pascal coding style | [docs/standards/coding-standards.md](docs/standards/coding-standards.md) |
 | Inline documentation | [docs/standards/documentation-standards.md](docs/standards/documentation-standards.md) |
 | Error handling | [docs/standards/error-handling.md](docs/standards/error-handling.md) |
+| Logging | [docs/standards/logging-standard.md](docs/standards/logging-standard.md) |
+| Observability | [docs/standards/observability-standard.md](docs/standards/observability-standard.md) |
 | Build | [docs/standards/build-standard.md](docs/standards/build-standard.md) |
 | SDD (instructor reference) | [docs/standards/sdd-instructor-reference.md](docs/standards/sdd-instructor-reference.md) |
 | SDD (learner guide) | [docs/standards/sdd-learner-guide.md](docs/standards/sdd-learner-guide.md) |
