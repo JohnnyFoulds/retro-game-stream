@@ -6,9 +6,15 @@ This file is the operating guide for AI assistance on this project. Read it befo
 
 ## Project standards
 
-| Standard                      | Document                                        |
-|-------------------------------|-------------------------------------------------|
+| Standard | Document |
+| --- | --- |
 | Architecture Decision Records | [docs/standards/adr.md](docs/standards/adr.md) |
+| Git and source control | [docs/standards/git-standard.md](docs/standards/git-standard.md) |
+| Pascal coding style | [docs/standards/coding-standards.md](docs/standards/coding-standards.md) |
+| Error handling | [docs/standards/error-handling.md](docs/standards/error-handling.md) |
+| Build | [docs/standards/build-standard.md](docs/standards/build-standard.md) |
+| SDD (instructor reference) | [docs/standards/sdd-instructor-reference.md](docs/standards/sdd-instructor-reference.md) |
+| SDD (learner guide) | [docs/standards/sdd-learner-guide.md](docs/standards/sdd-learner-guide.md) |
 
 All significant design decisions are recorded as ADRs in [docs/decisions/](docs/decisions/). Before questioning or changing a foundational decision, read the relevant ADR first.
 
