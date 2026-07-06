@@ -87,7 +87,9 @@ Understanding exactly what TP7 lacks is essential to designing a viable test fra
 
 TP7 has no `try`, `except`, `raise`, or `finally`. Runtime errors (array bounds violations, stack overflow) cause the program to halt immediately with a runtime error number and address. There is no mechanism to catch a runtime error and continue.
 
-**Testing implication:** The JUnit pattern — `assert` raises an exception, the runner catches it, records a failure, and continues to the next test — is impossible in TP7. Failure must be signalled through a return value or a global flag, and the runner must check this flag after each test call and decide whether to continue.
+This is not a gap without a substitute. The project's [error-handling standard](../../standards/error-handling.md) defines the TP7 equivalent discipline: recoverable failures are signalled via `Boolean` return values and `errorMsg` out-parameters; impossible states call `Halt(99)`. The same three-category model (programmer error / recoverable runtime error / impossible state) applies in tests — a test that calls a procedure which returns `False` is observing a recoverable failure, and the test asserts on that return value directly.
+
+**Testing implication:** The JUnit pattern — `assert` raises an exception, the runner catches it, records a failure, and continues to the next test — is impossible in TP7. Failure must be signalled through a return value or a global flag, and the runner must check this flag after each test call and decide whether to continue. This maps naturally onto the error-handling standard: test assertions mirror the same `Boolean` / `errorMsg` contract that the game code itself uses.
 
 ### 3.2 No RTTI or published methods
 
@@ -274,7 +276,7 @@ procedure Fail(const desc: String);
 
 ### 7.2 Test isolation without exceptions
 
-Since TP7 has no exceptions, isolation is achieved via a global failure flag:
+Since TP7 has no exceptions, isolation is achieved via a global failure flag. This is the natural extension of the pattern the [error-handling standard](../../standards/error-handling.md) already establishes for production code: failures are signalled through return values, not raised and caught. A test assertion is simply a check of that same return value, with the runner acting as the "caller that must check every `False` return."
 
 ```pascal
 { Inside TPTEST implementation }
