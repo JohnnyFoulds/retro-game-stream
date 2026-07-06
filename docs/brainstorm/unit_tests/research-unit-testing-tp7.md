@@ -1,0 +1,865 @@
+# Unit Testing for Turbo Pascal 7 — Research Report
+
+**Date:** 2026-07-06
+**Status:** Research complete — design decision pending
+
+---
+
+## Executive summary
+
+Unit testing in Turbo Pascal 7 is constrained by the absence of exceptions, RTTI, generics, and the modern `class` keyword. Every mainstream Pascal testing framework (DUnit, DUnitX, FPCUnit, FPTest, pascal-tap) is architecturally incompatible with TP7. The sole framework with confirmed, tested TP7 support — **tap4pascal** — is abandoned (2010) but demonstrates the right pattern: procedural-type registration arrays producing **TAP** (Test Anything Protocol) plain-text output.
+
+A hand-rolled `TPTEST.PAS` unit, built on the same principles, can achieve all the practically useful pytest features within TP7's constraints. VS Code Testing tab integration is feasible via a TAP-to-VS Code bridge script, with no changes required to the TP7 runner itself.
+
+**Recommendation:** Build a project-specific `TPTEST.PAS` unit. Do not attempt to port or use any existing framework. See §7.
+
+---
+
+## 1. Historical context: testing in the TP7 era
+
+In the Turbo Pascal 7 era (released 1992), no testing framework existed for Pascal. The dominant practice in commercial and educational Pascal development was:
+
+- **Assertion procedures**: hand-written `Assert(condition, message)` wrappers that call `Halt` on failure. These appear in Borland's own examples and in period textbooks.
+- **Driver programs**: a separate `TEST.PAS` program (not a unit) that calls procedures under test and `WriteLn`s PASS or FAIL. Each test was written as an explicit `if/then/WriteLn` block.
+- **Interactive testing**: running the program in the Turbo Pascal IDE debugger and inspecting variables in the watch window.
+
+None of these constitute a framework. There was no concept of test isolation, test registration, or structured output in the period literature. The xUnit family (SUnit, JUnit) did not appear until 1994–1998 — after TP7.
+
+---
+
+## 2. The mainstream Pascal testing landscape
+
+### 2.1 DUnit (Delphi)
+
+**Origin:** Port of JUnit to Delphi, first released around 1999–2002.
+**Requirements:** Delphi 5 or later; `class` keyword; `try`/`except`/`raise`; VCL or console runner.
+**How it works:** Test classes inherit from `TTestCase`. Test methods are discovered automatically via Delphi's RTTI (`published` methods). Each test method runs inside a `try/except` block; a raised `ETestFailure` is caught and recorded as a failure; any other exception is recorded as an error. Results are reported via a GUI or console runner.
+**TP7 compatibility:** None. Requires `class`, `published`, `try/except`, and RTTI — all absent in TP7.
+
+### 2.2 DUnitX (Delphi 2010+)
+
+**Requirements:** Delphi 2010 or later; custom attributes (`[Test]`); enhanced RTTI (`System.Rtti`); generics.
+**TP7 compatibility:** None whatsoever. Requires language features that arrived ~18 years after TP7.
+
+### 2.3 FPCUnit (Free Pascal Compiler built-in)
+
+**Origin:** Modelled after DUnit/JUnit/SUnit. Included with FPC since approximately FPC 2.0.
+**How it works:** Tests inherit from `TTestCase`. Test methods are `published` procedures discovered via FPC's RTTI. On assertion failure, `EAssertionFailedError` is raised and caught by the runner — execution of that test stops at the first failure. A separate `TTestRunner` walks the registered test suites.
+**TP7 compatibility:** None. Requires `class` with `published` methods, exceptions, and FPC-specific RTTI. The `{$mode objfpc}` directive required in most FPCUnit examples has no TP7 equivalent.
+
+### 2.4 FPTest (FPC)
+
+**Origin:** Fork of DUnit2 for Free Pascal.
+**How it works:** Uses RTTI-based `published` method discovery. Requires `{$mode delphi}` or `{$mode objfpc}`, FPC `class` keyword, and exceptions.
+**TP7 compatibility:** None. The `{$IFDEF FPC}` blocks in its source are the first hint; the RTTI dependency is the definitive blocker.
+
+### 2.5 pascal-tap (FPC)
+
+**Repository:** github.com/bbrtj/pascal-tap
+**How it works:** Produces TAP output. Uses FPC generics (`fgl` unit), `{$mode objfpc}`, and exception classes (`EBailout = class(Exception)`).
+**TP7 compatibility:** None. Uses multiple FPC-only language features in every source file.
+
+### 2.6 tap4pascal (SourceForge — abandoned 2010)
+
+**Repository:** sourceforge.net/projects/tap4pascal
+**Last release:** 2010-09-15. Status: Abandoned.
+**How it works:** Produces TAP-compliant plain-text output. Uses `{$IFDEF VER70}` conditional compilation to handle TP7-specific type gaps (e.g. `LongWord` aliased to `LongInt`). Ships a `Makefile.tp` for TP7's `MAKE.EXE`. Author documented: *"Has been tested under: Turbo Pascal 7 under DOS (yes, THAT DOS)."*
+**TP7 compatibility:** Confirmed. This is the only framework in the Pascal ecosystem with a documented, tested TP7 success.
+
+**Summary table:**
+
+| Framework | Language target | TP7 compatible? | Key blocker |
+| --- | --- | --- | --- |
+| DUnit | Delphi 5–2006 | No | `class`, `published`, exceptions |
+| DUnitX | Delphi 2010+ | No | Attributes, enhanced RTTI, generics |
+| FPCUnit | FPC | No | `class`, `published`, exceptions |
+| FPTest | FPC | No | RTTI, `{$mode}` directives |
+| pascal-tap | FPC | No | Generics, exceptions, `{$mode objfpc}` |
+| tap4pascal | TP7 + FPC | **Yes** | None — designed for TP7 |
+
+---
+
+## 3. TP7's constraints and their testing implications
+
+Understanding exactly what TP7 lacks is essential to designing a viable test framework.
+
+### 3.1 No exceptions
+
+TP7 has no `try`, `except`, `raise`, or `finally`. Runtime errors (array bounds violations, stack overflow) cause the program to halt immediately with a runtime error number and address. There is no mechanism to catch a runtime error and continue.
+
+This is not a gap without a substitute. The project's [error-handling standard](../../standards/error-handling.md) defines the TP7 equivalent discipline: recoverable failures are signalled via `Boolean` return values and `errorMsg` out-parameters; impossible states call `Halt(99)`. The same three-category model (programmer error / recoverable runtime error / impossible state) applies in tests — a test that calls a procedure which returns `False` is observing a recoverable failure, and the test asserts on that return value directly.
+
+**Testing implication:** The JUnit pattern — `assert` raises an exception, the runner catches it, records a failure, and continues to the next test — is impossible in TP7. Failure must be signalled through a return value or a global flag, and the runner must check this flag after each test call and decide whether to continue. This maps naturally onto the error-handling standard: test assertions mirror the same `Boolean` / `errorMsg` contract that the game code itself uses.
+
+### 3.2 No RTTI or published methods
+
+TP7's `object` keyword (from TP 5.5) has `private` and `public` visibility only — no `published` section. There is no runtime type information system. Method names cannot be enumerated at runtime.
+
+**Testing implication:** Auto-discovery of test methods (the mechanism used by every JUnit-descended framework) is impossible. Tests must be explicitly registered by the programmer. This is a real ergonomic cost but is unavoidable.
+
+### 3.3 No class keyword
+
+TP7 has the `object` type (object-oriented Pascal, TP 5.5 style) but not the Delphi/Java/C# `class` type. Object instances are stack-allocated (no implicit reference semantics). Virtual methods require explicit `virtual` declarations and a `constructor` to initialise the VMT.
+
+**Testing implication:** The TTestCase inheritance pattern is possible using `object` but adds complexity. The simpler and more appropriate approach is plain procedure registration — no inheritance hierarchy needed.
+
+### 3.4 Procedural types are available
+
+TP7 *does* have procedural types (procedure variables). A variable of a procedural type can hold `nil`, or the address of any global procedure with a matching signature. The `@` address operator is not required in TP7 mode (unlike FPC default mode).
+
+```pascal
+type
+  TTestProc = procedure;
+
+var
+  myTest : TTestProc;
+begin
+  myTest := SomeTestProcedure;  { assignment without @ in TP7 mode }
+  myTest;                        { call via variable }
+end;
+```
+
+**Testing implication:** A registration array of `(name: String; proc: TTestProc)` records is viable. This is the foundation of any TP7-compatible test runner.
+
+### 3.5 No generics
+
+**Testing implication:** Assertion helpers must be written for each type: `AssertTrue`, `AssertEqual` (Integer), `AssertEqualStr`, `AssertEqualChar`, etc. No generic `Assert<T>`. This is a moderate ergonomic cost.
+
+### 3.6 DOS real mode, 640 KB limit
+
+TP7 targets 16-bit real mode DOS. A large test suite that loads much game state could approach memory limits.
+
+**Testing implication:** Keep the test binary separate from the game binary. `TEST.EXE` compiles only the units under test plus the test runner — not the full game program.
+
+---
+
+## 4. TAP: Test Anything Protocol
+
+TAP is the right output format for a TP7 test runner. It was designed to be producible by any language — even `sh` — and consumable by any tool.
+
+### 4.1 Format
+
+A TAP stream consists of:
+
+1. A **plan line** at the beginning (or end, never middle): `1..N` — declares the total number of tests
+2. One **result line** per test: `ok N description` or `not ok N description`
+3. Optional **diagnostic lines**: `# anything` — ignored by parsers but displayed to humans
+
+Complete example:
+
+```
+1..5
+ok 1 world initialises to correct dimensions
+ok 2 player starts at spawn position
+not ok 3 player collects dollar sign
+# expected score=1, got score=0
+ok 4 player cannot walk through wall
+ok 5 enemy moves left when direction is left
+```
+
+### 4.2 Why TAP is ideal for TP7
+
+- **Zero dependencies.** Valid TAP is produced entirely with `WriteLn`.
+- **Language-agnostic consumers.** Any tool that reads TAP can process the output — shell scripts, Node.js, Python, CI systems.
+- **Standard exit code convention.** Exit 0 = all tests passed; non-zero = failures exist. This integrates with `make test`.
+- **Parseable by VS Code adapters.** TAP consumers exist for VS Code (see §6).
+
+### 4.3 tap4pascal as reference
+
+tap4pascal's `TAP.pas` unit (available on SourceForge) demonstrates the TP7-compatible TAP approach. Key observations from its source:
+
+- Uses `{$IFDEF VER70}` to handle TP7 type differences
+- Uses procedural types for test registration
+- Emits TAP lines via `WriteLn`
+- No exceptions, no RTTI, no `class`
+
+Its API is more complex than necessary for a course project. The design of `TPTEST.PAS` (see §7) simplifies it considerably.
+
+---
+
+## 5. Achievable pytest-equivalent features in TP7
+
+| pytest feature | Achievable in TP7? | Mechanism |
+| --- | --- | --- |
+| Named test output (`PASSED test_name`) | **Yes** | `ok N name` in TAP output |
+| Pass/fail per test | **Yes** | `ok` / `not ok` lines |
+| Summary count (N passed, M failed) | **Yes** | Count during runner loop; `WriteLn` at end |
+| Continue after individual test failure | **Yes** | Global `testFailed` flag; runner checks after each call |
+| Failure message / description | **Yes** | TAP diagnostic lines (`# expected X got Y`) |
+| Setup / teardown | **Yes** | Explicit `SetUp`/`TearDown` procedures called by runner |
+| Auto-discovery of test procedures | **No** | Must register explicitly — no RTTI |
+| Parameterised tests | **Partial** | Manual loop over a data array; registerable |
+| Nested test suites / grouping | **Partial** | Naming convention (`GroupName_TestName`); TAP has no native grouping |
+| Exception testing (`with pytest.raises`) | **No** | No exceptions in TP7 |
+| Fixtures / dependency injection | **No** | Use global state or explicit parameters instead |
+
+The two hard losses — auto-discovery and exception testing — are unavoidable. Everything else is achievable. For a course project testing a DOS game, neither loss is significant: the test suite is small enough that explicit registration is no burden, and the game code uses boolean return codes rather than exceptions anyway.
+
+---
+
+## 6. VS Code Testing tab integration
+
+### 6.1 Current state
+
+No Pascal or TP7-specific VS Code test adapter exists as of the research date. The VS Code Testing API requires a test adapter extension that:
+
+1. Discovers test items (populates the Testing sidebar tree)
+2. Runs tests and reports results back to VS Code
+3. Optionally supports debugging and per-line annotations
+
+### 6.2 TAP bridge approach
+
+TAP output from a TP7 test binary can be bridged to VS Code via a small Node.js or Python script acting as a VS Code test adapter:
+
+```
+make test
+  → runs TEST.EXE under DOSBox / js-dos
+  → TEST.EXE writes TAP to stdout
+  → stdout captured by the Makefile
+  → Node.js TAP parser reads stdout
+  → Reports pass/fail to VS Code Testing API
+```
+
+The TAP parsing layer is trivial — the format is simple enough to parse with a 20-line script. The harder part is the VS Code extension boilerplate for a custom test adapter.
+
+### 6.3 Practical recommendation for the course
+
+For the course context, the VS Code Testing tab integration is **optional and deferred**. The primary test workflow is:
+
+1. `make test` in the terminal — exits 0 on all pass, non-zero on any failure
+2. TAP output readable directly in the terminal
+3. CI/build system can parse exit code
+
+A future enhancement could add a VS Code extension, but this is not blocking for the course day.
+
+### 6.4 Generic TAP consumers in VS Code
+
+The extension **Test Explorer UI** (by Holger Benl, widely used) supports generic test adapters. A custom adapter implementing its API could parse TAP output from any process. Several TAP-consuming adapters already exist for Node.js, Perl, and Python tests within this framework — the Pascal case would require a new adapter but no new concept.
+
+---
+
+## 7. Recommended design: TPTEST.PAS
+
+Based on the research findings, the recommended approach is a project-specific `TPTEST.PAS` unit. This section outlines the design; a formal standard document and implementation follow separately.
+
+### 7.1 Core design
+
+```pascal
+unit TPTEST;
+
+{ Minimal TAP-producing test runner for Turbo Pascal 7.
+  Provides test registration, pass/fail tracking, assertion helpers,
+  and TAP output. Compatible with TP7 real-mode DOS. }
+
+interface
+
+const
+  MAX_TESTS = 64;
+
+type
+  TTestProc = procedure;
+
+{ Register a test procedure with a name. Call once per test before RunTests. }
+procedure RegisterTest(const name: String; proc: TTestProc);
+
+{ Run all registered tests. Emits TAP to stdout. Returns number of failures. }
+function RunTests: Integer;
+
+{ Assertion helpers — call from inside a test procedure }
+procedure AssertTrue(const desc: String; condition: Boolean);
+procedure AssertFalse(const desc: String; condition: Boolean);
+procedure AssertEqualInt(const desc: String; expected, actual: Integer);
+procedure AssertEqualStr(const desc: String; const expected, actual: String);
+procedure AssertEqualChar(const desc: String; expected, actual: Char);
+procedure Fail(const desc: String);
+```
+
+### 7.2 Test isolation without exceptions
+
+Since TP7 has no exceptions, isolation is achieved via a global failure flag. This is the natural extension of the pattern the [error-handling standard](../../standards/error-handling.md) already establishes for production code: failures are signalled through return values, not raised and caught. A test assertion is simply a check of that same return value, with the runner acting as the "caller that must check every `False` return."
+
+```pascal
+{ Inside TPTEST implementation }
+var
+  currentTestFailed : Boolean;
+
+procedure AssertTrue(const desc: String; condition: Boolean);
+begin
+  if not condition then
+  begin
+    WriteLn('# FAIL: ', desc);
+    currentTestFailed := True;
+    { Cannot raise — mark flag and return; runner checks after the call }
+  end;
+end;
+```
+
+The runner resets `currentTestFailed := False` before each test call, calls the test, then checks the flag:
+
+```pascal
+{ Runner loop (simplified) }
+for i := 1 to testCount do
+begin
+  currentTestFailed := False;
+  tests[i].proc;   { call the test procedure }
+  if currentTestFailed then
+  begin
+    WriteLn('not ok ', i, ' ', tests[i].name);
+    Inc(failCount);
+  end
+  else
+    WriteLn('ok ', i, ' ', tests[i].name);
+end;
+```
+
+This gives complete isolation: one failing assertion marks the test as failed but does not halt the runner or affect subsequent tests.
+
+### 7.3 Usage pattern
+
+A test file (`TEST.PAS`) looks like this:
+
+```pascal
+program TEST;
+
+uses TPTEST, WORLD, PLAYER;
+
+{ --- Test procedures --- }
+
+procedure Test_WorldInitialisesToEmptyTiles;
+var
+  W : TWorld;
+begin
+  InitWorld(W);
+  AssertEqualInt('world width',  40, W.Width);
+  AssertEqualInt('world height', 20, W.Height);
+  AssertTrue('tile[0][0] is empty', W.Tiles[0][0] = tileEmpty);
+end;
+
+procedure Test_PlayerStartsAtSpawnPosition;
+var
+  P : TPlayer;
+begin
+  InitPlayer(P, 5, 10);
+  AssertEqualInt('player X', 5, P.X);
+  AssertEqualInt('player Y', 10, P.Y);
+  AssertTrue('player alive', P.isAlive);
+end;
+
+procedure Test_CollectDollarIncreasesScore;
+var
+  W     : TWorld;
+  score : Integer;
+  msg   : String;
+begin
+  InitWorld(W);
+  W.Tiles[3][5] := tileDollar;
+  score := 0;
+  AssertTrue('collect succeeds',
+    CollectDollar(W, 5, 3, score, msg));
+  AssertEqualInt('score incremented', 1, score);
+  AssertTrue('tile replaced', W.Tiles[3][5] = tileEmpty);
+end;
+
+{ --- Main --- }
+
+begin
+  RegisterTest('world initialises to empty tiles',
+               Test_WorldInitialisesToEmptyTiles);
+  RegisterTest('player starts at spawn position',
+               Test_PlayerStartsAtSpawnPosition);
+  RegisterTest('collect dollar increases score',
+               Test_CollectDollarIncreasesScore);
+
+  if RunTests > 0 then Halt(1);
+end.
+```
+
+Output:
+
+```
+1..3
+ok 1 world initialises to empty tiles
+ok 2 player starts at spawn position
+not ok 3 collect dollar increases score
+# FAIL: collect succeeds: expected True got False
+# 1 failed of 3
+```
+
+### 7.4 Comparison with pytest
+
+```python
+# pytest
+def test_collect_dollar_increases_score():
+    world = World()
+    world.set_tile(5, 3, DOLLAR)
+    score = collect_dollar(world, 5, 3, score=0)
+    assert score == 1
+    assert world.get_tile(5, 3) == EMPTY
+```
+
+```pascal
+{ TPTEST equivalent }
+procedure Test_CollectDollarIncreasesScore;
+var W: TWorld; score: Integer; msg: String;
+begin
+  InitWorld(W);
+  W.Tiles[3][5] := tileDollar;
+  score := 0;
+  AssertTrue('collect succeeds', CollectDollar(W, 5, 3, score, msg));
+  AssertEqualInt('score', 1, score);
+  AssertTrue('tile cleared', W.Tiles[3][5] = tileEmpty);
+end;
+```
+
+The verbosity gap is real (explicit `var` block, `InitWorld` call, message strings on every assertion) but the *discipline* is identical: set up state, call the function under test, assert postconditions.
+
+---
+
+## 8. VS Code Testing tab bridge — design and implementation
+
+The bridge is the glue between `TEST.EXE`'s TAP output and the VS Code Testing sidebar. It has three layers that can be built and shipped independently.
+
+```
+TEST.EXE (DOS binary)
+    │  TAP plain text → build/TEST.TAP
+    ▼
+run-tests.py  (Python — invokes DOSBox, prints human-readable summary)
+    │  terminal output + non-zero exit on failure
+    ▼
+make test     (Makefile target — calls run-tests.py)
+
+                  separately, for VS Code only:
+    ▼
+tap-bridge.js  (Node.js — reads TEST.TAP, feeds VS Code Testing API)
+    │  VS Code TestItem tree + TestRun results
+    ▼
+VS Code Testing sidebar  (pass/fail icons, test tree, output panel)
+```
+
+**Why Python for the runner and Node.js for the extension?**
+
+The VS Code extension host is a Node.js process — there is no Python binding to the VS Code API (`TestController`, `TestRun`, `TestItem`). That layer **must** be JavaScript. However, for everything that runs outside VS Code — invoking DOSBox, parsing TAP output, printing a terminal summary — Python is the better choice for this project: it is more likely to be present in the course environment than Node.js, the subprocess and file I/O idioms are more readable for a mixed audience, and `make test` calling a Python script is simpler to explain.
+
+The VS Code extension can therefore be thin: it calls `make test` (which writes `TEST.TAP` via Python), then reads that file and parses it. The TAP-parsing logic exists in both Python (for terminal use) and JavaScript (for the extension), but the parser is trivial enough (~40 lines each) that the duplication is not a problem.
+
+### 8.1 Layer 1: running TEST.EXE and capturing TAP output
+
+`TEST.EXE` is a 16-bit DOS binary. On macOS and Linux it runs under **DOSBox** or **DOSBox-X**; on Windows it runs natively or under DOSBox. The primary runner is a Python script that invokes DOSBox, reads the output file, and prints a human-readable summary with a non-zero exit code on failure.
+
+**Recommended: `tools/run-tests.py` (Python)**
+
+```python
+# tools/run-tests.py
+# Invoke TEST.EXE via DOSBox, parse TAP output, and report results.
+# Exit code: 0 = all passed, 1 = failures present.
+
+import subprocess
+import sys
+import re
+import os
+
+TAP_PATH = os.path.join('games', 'corporate-ladder', 'build', 'TEST.TAP')
+
+def run_dosbox():
+    subprocess.run([
+        'dosbox',
+        '-c', 'mount c .',
+        '-c', 'c:',
+        '-c', r'cd games\corporate-ladder\build',
+        '-c', 'TEST.EXE > TEST.TAP',
+        '-c', 'exit',
+        '-exit',
+    ], check=True)
+
+def parse_and_report(tap):
+    passed = 0
+    failed = 0
+    for line in tap.splitlines():
+        m = re.match(r'^(ok|not ok)\s+(\d+)\s+(.*)', line)
+        if m:
+            status, num, name = m.groups()
+            icon = 'PASS' if status == 'ok' else 'FAIL'
+            print(f'  [{icon}] {num} {name}')
+            if status == 'ok':
+                passed += 1
+            else:
+                failed += 1
+        elif line.startswith('#'):
+            print(f'       {line}')
+    print()
+    print(f'{passed} passed, {failed} failed')
+    return failed
+
+def main():
+    print('Running Turbo Pascal tests...')
+    run_dosbox()
+    tap = open(TAP_PATH).read()
+    failures = parse_and_report(tap)
+    sys.exit(1 if failures > 0 else 0)
+
+if __name__ == '__main__':
+    main()
+```
+
+Terminal output from `make test`:
+
+```text
+Running Turbo Pascal tests...
+  [PASS] 1 world initialises to empty tiles
+  [PASS] 2 player starts at spawn position
+  [FAIL] 3 collect dollar increases score
+       # FAIL: collect succeeds: expected True got False
+
+2 passed, 1 failed
+```
+
+#### Alternative: native DOS on Windows
+
+On Windows, `TEST.EXE` runs natively:
+
+```batch
+games\corporate-ladder\build\TEST.EXE > build\TEST.TAP
+python tools\run-tests.py
+```
+
+The Makefile handles platform detection and uses the right option. For the course, DOSBox is assumed as the primary platform.
+
+### 8.2 Layer 2: the TAP parser
+
+TAP is simple enough that a parser is ~40 lines. This is the bridge script's core. It needs to handle four line types:
+
+```
+1..N          → plan line: total test count
+ok N name     → passing test
+not ok N name → failing test
+# message     → diagnostic line (associated with the preceding test)
+```
+
+```javascript
+// tap-parser.js — standalone Node.js module
+// Usage: const results = parseTap(tapString)
+
+function parseTap(tap) {
+  const lines = tap.split(/\r?\n/);
+  const results = { plan: 0, tests: [], passed: 0, failed: 0 };
+  let currentTest = null;
+
+  for (const line of lines) {
+    // Plan line: 1..N
+    const plan = line.match(/^1\.\.(\d+)/);
+    if (plan) {
+      results.plan = parseInt(plan[1], 10);
+      continue;
+    }
+
+    // Result line: ok N description  /  not ok N description
+    const result = line.match(/^(not ok|ok)\s+(\d+)\s*(.*)/);
+    if (result) {
+      currentTest = {
+        passed:      result[1] === 'ok',
+        number:      parseInt(result[2], 10),
+        name:        result[3].trim(),
+        diagnostics: [],
+      };
+      results.tests.push(currentTest);
+      if (currentTest.passed) results.passed++;
+      else                    results.failed++;
+      continue;
+    }
+
+    // Diagnostic line: # message
+    const diag = line.match(/^#\s*(.*)/);
+    if (diag && currentTest) {
+      currentTest.diagnostics.push(diag[1]);
+    }
+  }
+
+  return results;
+}
+
+module.exports = { parseTap };
+```
+
+Example input and output:
+
+```
+Input TAP string:
+  1..3
+  ok 1 world initialises to empty tiles
+  ok 2 player starts at spawn position
+  not ok 3 collect dollar increases score
+  # FAIL: collect succeeds: expected True got False
+
+Parsed result object:
+  {
+    plan: 3,
+    passed: 2,
+    failed: 1,
+    tests: [
+      { passed: true,  number: 1, name: 'world initialises to empty tiles', diagnostics: [] },
+      { passed: true,  number: 2, name: 'player starts at spawn position',  diagnostics: [] },
+      { passed: false, number: 3, name: 'collect dollar increases score',
+        diagnostics: ['FAIL: collect succeeds: expected True got False'] }
+    ]
+  }
+```
+
+### 8.3 Layer 3: the VS Code extension
+
+The VS Code Testing API (introduced in VS Code 1.59) requires an extension that implements three responsibilities:
+
+1. **Discovery** — populates the test tree in the Testing sidebar (`TestController.createTestItem`)
+2. **Execution** — runs tests and reports results (`TestRun`)
+3. **Output** — attaches diagnostic messages to test items
+
+For a TAP-based runner, discovery is driven by parsing `TEST.PAS` source to find `RegisterTest(...)` calls, **or** (simpler) by running `make test` once and populating the tree from the TAP output.
+
+```javascript
+// extension.js — VS Code extension entry point (simplified)
+const vscode = require('vscode');
+const { execSync } = require('child_process');
+const { parseTap } = require('./tap-parser');
+
+function activate(context) {
+  // Create a named test controller — appears as a section in the Testing sidebar
+  const ctrl = vscode.tests.createTestController(
+    'tptest',
+    'Turbo Pascal Tests'
+  );
+  context.subscriptions.push(ctrl);
+
+  // Run handler — called when the user clicks Run in the sidebar
+  ctrl.createRunProfile(
+    'Run',
+    vscode.TestRunProfileKind.Run,
+    async (request, token) => {
+      const run = ctrl.createTestRun(request);
+
+      try {
+        // 1. Execute the test binary and capture TAP output
+        //    'make test' compiles TEST.EXE and runs it via DOSBox,
+        //    writing TAP output to build/TEST.TAP
+        execSync('make test', {
+          cwd: workspaceRoot(),
+          timeout: 30000,
+        });
+
+        const tapRaw = require('fs')
+          .readFileSync(tapOutputPath(), 'utf8');
+
+        // 2. Parse TAP
+        const results = parseTap(tapRaw);
+
+        // 3. Sync test items into the controller tree
+        syncTestItems(ctrl, results.tests);
+
+        // 4. Report results
+        for (const t of results.tests) {
+          const item = ctrl.items.get(String(t.number));
+          if (!item) continue;
+
+          if (t.passed) {
+            run.passed(item);
+          } else {
+            const msg = new vscode.TestMessage(
+              t.diagnostics.join('\n') || 'Test failed'
+            );
+            run.failed(item, msg);
+          }
+        }
+      } catch (err) {
+        run.appendOutput(`make test failed: ${err.message}\r\n`);
+      } finally {
+        run.end();
+      }
+    }
+  );
+
+  // Initial population: run once on activation if TAP output already exists
+  if (tapOutputExists()) {
+    const tapRaw = require('fs').readFileSync(tapOutputPath(), 'utf8');
+    syncTestItems(ctrl, parseTap(tapRaw).tests);
+  }
+}
+
+function syncTestItems(ctrl, tests) {
+  // Create or update one TestItem per test
+  for (const t of tests) {
+    const id = String(t.number);
+    let item = ctrl.items.get(id);
+    if (!item) {
+      item = ctrl.createTestItem(id, t.name);
+      // Optionally set item.uri to point to TEST.PAS
+      ctrl.items.add(item);
+    } else {
+      item.label = t.name;
+    }
+  }
+}
+
+function workspaceRoot() {
+  return vscode.workspace.workspaceFolders[0].uri.fsPath;
+}
+function tapOutputPath() {
+  return require('path').join(workspaceRoot(),
+    'games', 'corporate-ladder', 'build', 'TEST.TAP');
+}
+function tapOutputExists() {
+  return require('fs').existsSync(tapOutputPath());
+}
+
+module.exports = { activate };
+```
+
+The extension manifest (`package.json`) declares it as a test provider:
+
+```json
+{
+  "name": "tptest-adapter",
+  "displayName": "Turbo Pascal Test Adapter",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.59.0" },
+  "activationEvents": [
+    "workspaceContains:**/TEST.PAS"
+  ],
+  "contributes": {
+    "commands": []
+  },
+  "main": "./extension.js"
+}
+```
+
+`activationEvents: workspaceContains:**/TEST.PAS` means the extension activates automatically when VS Code opens a workspace containing a `TEST.PAS` file — no manual activation needed.
+
+### 8.4 The Makefile integration
+
+`make test` needs to both run the binary **and** save TAP output to a file the bridge can read, while still printing it to the terminal:
+
+```makefile
+TEST_EXE = build/TEST.EXE
+TAP_FILE = build/TEST.TAP
+
+test: $(TEST_EXE)
+    python3 tools/run-tests.py
+```
+
+`run-tests.py` handles invoking DOSBox, writing `TEST.TAP`, printing the human-readable summary, and exiting with a non-zero code on failure. The VS Code extension reads `TEST.TAP` separately after `make test` completes.
+
+### 8.5 What the VS Code experience looks like
+
+After wiring the extension:
+
+**Testing sidebar tree:**
+
+```text
+▼ Turbo Pascal Tests
+  ✓ world initialises to empty tiles
+  ✓ player starts at spawn position
+  ✗ collect dollar increases score
+```
+
+**Test output panel** (when the failing test is selected):
+
+```text
+FAIL: collect succeeds: expected True got False
+```
+
+**What works:**
+
+- Pass/fail icons per test in the sidebar
+- Test names populated from TAP output
+- Diagnostic messages on failures
+- Re-run all tests via the Run button
+
+**What does not work vs pytest:**
+
+- Sidebar does not populate until after the first `make test` run (no source scanning)
+- No "run single test in isolation" button — all tests run together
+- No inline gutter icons next to test procedures in the editor
+- No auto-refresh on save — must click Run explicitly
+
+### 8.6 Implementation phasing
+
+The bridge has three independently shippable layers. The course can adopt them incrementally:
+
+| Phase | What it delivers | Effort | Language |
+| --- | --- | --- | --- |
+| **Phase 1** | `make test` calls `run-tests.py`; TAP to terminal; non-zero exit on failure | ~50 lines | Python |
+| **Phase 2** | Human-readable summary with pass/fail icons; `TEST.TAP` written for downstream use | included in Phase 1 | Python |
+| **Phase 3** | Full VS Code extension: sidebar tree + pass/fail icons; reads `TEST.TAP` | ~150 lines + `package.json` | Node.js |
+
+Phase 1 is sufficient for the course day. Phase 3 is an enhancement for the reference implementation — it requires Node.js only because the VS Code extension host is Node.js; the Python runner already does everything needed for terminal and CI use.
+
+---
+
+## 9. What to test: unit vs acceptance
+
+The course uses two complementary test types:
+
+| Type | File | What it tests | When it runs |
+| --- | --- | --- | --- |
+| **Unit tests** (`TPTEST.PAS`) | `tests/TEST.PAS` | Individual procedures in isolation — pure logic, no screen output | `make test` — automated, every commit |
+| **Manual acceptance tests** | `tests/manual-acceptance-tests.md` | Observable game behaviour — player moves, enemies chase, score displays | Manually, before every commit that closes a requirement |
+
+Unit tests are appropriate for:
+- Pure logic procedures: `CollectDollar`, `ValidateMove`, `UpdateEnemy`
+- Data initialisation: `InitWorld`, `InitPlayer`
+- Tile queries: `IsTilePassable`, `TileChar`
+
+Unit tests are **not** appropriate for:
+- Rendering procedures (`DrawWorld`, `DrawPlayer`) — screen output cannot be asserted programmatically in TP7
+- Input handling (`ReadKey`, `GetDirection`) — requires interactive keyboard
+- Full game-loop integration — tested by manual acceptance tests
+
+---
+
+## 9. Key decisions for the standards document
+
+The following decisions need to be made (or recommended) in the subsequent standards document:
+
+| Decision | Recommended choice | Rationale |
+| --- | --- | --- |
+| Framework | Hand-rolled `TPTEST.PAS` | Only viable option; tap4pascal is abandoned and over-engineered for this scope |
+| Output format | TAP | Standard, parseable, trivially producible, future VS Code bridge-ready |
+| Test file name | `TEST.PAS` (program, not unit) | Keeps test binary separate; DOS 8.3 filename |
+| Test procedure naming | `Test_UnitName_What` | Readable in TAP output; groups by unit under test |
+| Failure isolation | Global flag pattern | Only viable pattern without exceptions |
+| Assertion messages | Mandatory on every assertion | Makes TAP diagnostic output self-describing |
+| Test registration | Explicit `RegisterTest` calls | No RTTI auto-discovery possible |
+| `make test` exit code | Non-zero on any failure | Integrates with CI and build tooling |
+| VS Code integration | Deferred | Not blocking; TAP output suffices for terminal workflow |
+
+---
+
+## 10. Sources and confidence
+
+All findings are based on multi-source verification (3-agent adversarial verification per claim). Two claims were **refuted** during verification:
+
+1. *"FPCUnit requires tests to be written as published methods"* — partially incorrect: FPCUnit's runner uses `published` for auto-discovery but tests can also be registered manually. This does not affect TP7 compatibility (exceptions and `class` are still blockers).
+
+2. *"FPTest uses the `{$mode objfpc}{$H+}` compiler directive in all source files"* — partially incorrect: FPTest supports `{$mode delphi}` as well. Again does not affect TP7 compatibility.
+
+| Claim | Confidence |
+| --- | --- |
+| tap4pascal is the only TP7-compatible Pascal test framework | High |
+| TAP is trivially producible from TP7 with WriteLn | High |
+| DUnit, FPCUnit, FPTest, DUnitX, pascal-tap are incompatible with TP7 | High |
+| TP7's core constraints (no exceptions, no RTTI, no class) | High |
+| A procedural-type registration array achieves near-pytest ergonomics | Medium |
+| No VS Code TAP adapter for Pascal exists | Medium |
+
+---
+
+## References
+
+- tap4pascal, SourceForge: https://sourceforge.net/projects/tap4pascal/
+- TAP specification: https://testanything.org/tap-specification.html
+- TAP producers list (confirms tap4pascal): https://testanything.org/producers.html
+- DUnit: https://dunit.sourceforge.net/
+- FPCUnit: https://wiki.freepascal.org/FPCUnit
+- FPTest: https://wiki.freepascal.org/FPTest / https://github.com/graemeg/fptest
+- DUnitX: https://github.com/VSoftTechnologies/DUnitX
+- pascal-tap: https://github.com/bbrtj/pascal-tap
+- Test Explorer UI (VS Code): https://marketplace.visualstudio.com/items?itemName=hbenl.vscode-test-explorer
+- Borland International, *Turbo Pascal 7.0 Language Guide*, 1992
+- 12 Factor App — Logs: https://12factor.net/logs

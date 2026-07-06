@@ -6,9 +6,18 @@ This file is the operating guide for AI assistance on this project. Read it befo
 
 ## Project standards
 
-| Standard                      | Document                                        |
-|-------------------------------|-------------------------------------------------|
+| Standard | Document |
+| --- | --- |
 | Architecture Decision Records | [docs/standards/adr.md](docs/standards/adr.md) |
+| Git and source control | [docs/standards/git-standard.md](docs/standards/git-standard.md) |
+| Pascal coding style | [docs/standards/coding-standards.md](docs/standards/coding-standards.md) |
+| Inline documentation | [docs/standards/documentation-standards.md](docs/standards/documentation-standards.md) |
+| Error handling | [docs/standards/error-handling.md](docs/standards/error-handling.md) |
+| Logging | [docs/standards/logging-standard.md](docs/standards/logging-standard.md) |
+| Observability | [docs/standards/observability-standard.md](docs/standards/observability-standard.md) |
+| Build | [docs/standards/build-standard.md](docs/standards/build-standard.md) |
+| SDD (instructor reference) | [docs/standards/sdd-instructor-reference.md](docs/standards/sdd-instructor-reference.md) |
+| SDD (learner guide) | [docs/standards/sdd-learner-guide.md](docs/standards/sdd-learner-guide.md) |
 
 All significant design decisions are recorded as ADRs in [docs/decisions/](docs/decisions/). Before questioning or changing a foundational decision, read the relevant ADR first.
 
@@ -32,17 +41,20 @@ The current target game is *The Corporate Ladder: Avoid Middle Management*. Game
 Every piece of course material should reinforce one or more of these.
 
 ### 1. Specification-Driven Development (SDD)
+
 Decompose a vague idea into small, observable requirements with explicit acceptance criteria *before* touching the AI. The requirement is the unit of work. The full loop:
 
-```
+```text
 Idea → Requirement → Acceptance Criterion → Design Decision → Code → Test → Commit → Playable
 ```
 
 ### 2. AI usage and prompting discipline
+
 Treat the AI as a *controlled implementation assistant*, not an autonomous developer. A well-formed prompt names the requirement ID, names the files to modify, names what not to do, and demands a diff before a commit.
 
 Good prompt pattern:
-```
+
+```text
 Implement R-007.
 
 Modify only WORLD.PAS, GAME.PAS, tests/manual-acceptance-tests.md,
@@ -54,14 +66,16 @@ Run the build and show the diff summary before proposing a commit.
 ```
 
 ### 3. Git as the engineering record
+
 A commit is an engineering claim, not a save. Every commit must carry: requirement ID, what changed, test result, build result. The evidence chain is:
 
-```
+```text
 playable game → build manifest → commit → diff → requirement
 ```
 
 Good commit format:
-```
+
+```text
 R-007 implement dollar collection
 
 - Remove dollar sign when player enters its cell
@@ -74,12 +88,14 @@ Tests: passed
 ```
 
 ### 4. Software design thinking
+
 - Static world (tile enum) vs dynamic entities (player, enemy records)
 - Rendering seam: visual representation changes must not ripple into game rules
 - Specify update order *before* implementation
 - YAGNI vs small intentional seams: don't over-engineer, but don't seal the doors you'll need later
 
 ### 5. AI-assisted research and documentation
+
 Use AI productively in the *discovery* phase (requirements, design decisions, extension backlog) as well as the *implementation* phase. These are different modes. The learner is the author throughout both.
 
 ---
@@ -146,7 +162,7 @@ retro-game-stream/
 ## Course module structure (game-agnostic)
 
 | Module | Goal |
-|--------|------|
+| --- | --- |
 | 0: Vibe-code baseline | Show the failure mode; establish why SDD matters |
 | 1: Requirements | Define requirements with acceptance criteria |
 | 2: Technical design | Core data model, rendering seam, update order |
@@ -163,8 +179,8 @@ retro-game-stream/
 
 Three builds of the game must exist by course day:
 
-| Version    | Purpose                             |
-|------------|-------------------------------------|
-| Starter    | Given to learners (skeletons only)  |
+| Version | Purpose |
+| --- | --- |
+| Starter | Given to learners (skeletons only) |
 | Checkpoint | Used if class falls behind schedule |
-| Complete   | Used for final demonstration        |
+| Complete | Used for final demonstration |
