@@ -415,7 +415,340 @@ The verbosity gap is real (explicit `var` block, `InitWorld` call, message strin
 
 ---
 
-## 8. What to test: unit vs acceptance
+## 8. VS Code Testing tab bridge — design and implementation
+
+The bridge is the glue between `TEST.EXE`'s TAP output and the VS Code Testing sidebar. It has three layers that can be built and shipped independently.
+
+```
+TEST.EXE (DOS binary)
+    │  TAP plain text on stdout
+    ▼
+tap-bridge.js  (Node.js — parses TAP, feeds VS Code Testing API)
+    │  VS Code TestItem tree + TestRun results
+    ▼
+VS Code Testing sidebar  (pass/fail icons, test tree, output panel)
+```
+
+### 8.1 Layer 1: running TEST.EXE and capturing TAP output
+
+`TEST.EXE` is a 16-bit DOS binary. On macOS and Linux it runs under **DOSBox** or **DOSBox-X**; on Windows it runs natively or under DOSBox. The bridge script needs to launch the binary, capture stdout, and get the exit code.
+
+**Option A — DOSBox with `-exit` flag (simplest):**
+
+```bash
+# run-tests.sh — wraps DOSBox, captures TAP output
+dosbox -c "mount c ." \
+       -c "c:" \
+       -c "cd games\\corporate-ladder\\build" \
+       -c "TEST.EXE > TAP.TXT" \
+       -c "exit" \
+       -exit
+
+cat games/corporate-ladder/build/TAP.TXT
+```
+
+DOSBox redirects stdout inside DOS to a file; the bridge script reads that file after DOSBox exits.
+
+**Option B — js-dos (browser / Electron context):**
+
+js-dos exposes a JavaScript API that can capture the virtual console output as a string. The bridge script passes this string directly to the TAP parser — no file needed:
+
+```javascript
+// Conceptual — js-dos API
+const { Dos } = require('js-dos');
+const dos = await Dos(canvas);
+const ci = await dos.run('TEST.EXE');
+const tapOutput = await ci.captureStdout();
+await ci.exit();
+parseTap(tapOutput);
+```
+
+**Option C — native DOS on Windows:**
+
+On Windows, `TEST.EXE` runs natively:
+
+```batch
+games\corporate-ladder\build\TEST.EXE > TAP.TXT
+```
+
+The Makefile handles platform detection and uses the right option. For the course, DOSBox is assumed as the primary platform.
+
+### 8.2 Layer 2: the TAP parser
+
+TAP is simple enough that a parser is ~40 lines. This is the bridge script's core. It needs to handle four line types:
+
+```
+1..N          → plan line: total test count
+ok N name     → passing test
+not ok N name → failing test
+# message     → diagnostic line (associated with the preceding test)
+```
+
+```javascript
+// tap-parser.js — standalone Node.js module
+// Usage: const results = parseTap(tapString)
+
+function parseTap(tap) {
+  const lines = tap.split(/\r?\n/);
+  const results = { plan: 0, tests: [], passed: 0, failed: 0 };
+  let currentTest = null;
+
+  for (const line of lines) {
+    // Plan line: 1..N
+    const plan = line.match(/^1\.\.(\d+)/);
+    if (plan) {
+      results.plan = parseInt(plan[1], 10);
+      continue;
+    }
+
+    // Result line: ok N description  /  not ok N description
+    const result = line.match(/^(not ok|ok)\s+(\d+)\s*(.*)/);
+    if (result) {
+      currentTest = {
+        passed:      result[1] === 'ok',
+        number:      parseInt(result[2], 10),
+        name:        result[3].trim(),
+        diagnostics: [],
+      };
+      results.tests.push(currentTest);
+      if (currentTest.passed) results.passed++;
+      else                    results.failed++;
+      continue;
+    }
+
+    // Diagnostic line: # message
+    const diag = line.match(/^#\s*(.*)/);
+    if (diag && currentTest) {
+      currentTest.diagnostics.push(diag[1]);
+    }
+  }
+
+  return results;
+}
+
+module.exports = { parseTap };
+```
+
+Example input and output:
+
+```
+Input TAP string:
+  1..3
+  ok 1 world initialises to empty tiles
+  ok 2 player starts at spawn position
+  not ok 3 collect dollar increases score
+  # FAIL: collect succeeds: expected True got False
+
+Parsed result object:
+  {
+    plan: 3,
+    passed: 2,
+    failed: 1,
+    tests: [
+      { passed: true,  number: 1, name: 'world initialises to empty tiles', diagnostics: [] },
+      { passed: true,  number: 2, name: 'player starts at spawn position',  diagnostics: [] },
+      { passed: false, number: 3, name: 'collect dollar increases score',
+        diagnostics: ['FAIL: collect succeeds: expected True got False'] }
+    ]
+  }
+```
+
+### 8.3 Layer 3: the VS Code extension
+
+The VS Code Testing API (introduced in VS Code 1.59) requires an extension that implements three responsibilities:
+
+1. **Discovery** — populates the test tree in the Testing sidebar (`TestController.createTestItem`)
+2. **Execution** — runs tests and reports results (`TestRun`)
+3. **Output** — attaches diagnostic messages to test items
+
+For a TAP-based runner, discovery is driven by parsing `TEST.PAS` source to find `RegisterTest(...)` calls, **or** (simpler) by running `make test` once and populating the tree from the TAP output.
+
+```javascript
+// extension.js — VS Code extension entry point (simplified)
+const vscode = require('vscode');
+const { execSync } = require('child_process');
+const { parseTap } = require('./tap-parser');
+
+function activate(context) {
+  // Create a named test controller — appears as a section in the Testing sidebar
+  const ctrl = vscode.tests.createTestController(
+    'tptest',
+    'Turbo Pascal Tests'
+  );
+  context.subscriptions.push(ctrl);
+
+  // Run handler — called when the user clicks Run in the sidebar
+  ctrl.createRunProfile(
+    'Run',
+    vscode.TestRunProfileKind.Run,
+    async (request, token) => {
+      const run = ctrl.createTestRun(request);
+
+      try {
+        // 1. Execute the test binary and capture TAP output
+        //    'make test' compiles TEST.EXE and runs it via DOSBox,
+        //    writing TAP output to build/TEST.TAP
+        execSync('make test', {
+          cwd: workspaceRoot(),
+          timeout: 30000,
+        });
+
+        const tapRaw = require('fs')
+          .readFileSync(tapOutputPath(), 'utf8');
+
+        // 2. Parse TAP
+        const results = parseTap(tapRaw);
+
+        // 3. Sync test items into the controller tree
+        syncTestItems(ctrl, results.tests);
+
+        // 4. Report results
+        for (const t of results.tests) {
+          const item = ctrl.items.get(String(t.number));
+          if (!item) continue;
+
+          if (t.passed) {
+            run.passed(item);
+          } else {
+            const msg = new vscode.TestMessage(
+              t.diagnostics.join('\n') || 'Test failed'
+            );
+            run.failed(item, msg);
+          }
+        }
+      } catch (err) {
+        run.appendOutput(`make test failed: ${err.message}\r\n`);
+      } finally {
+        run.end();
+      }
+    }
+  );
+
+  // Initial population: run once on activation if TAP output already exists
+  if (tapOutputExists()) {
+    const tapRaw = require('fs').readFileSync(tapOutputPath(), 'utf8');
+    syncTestItems(ctrl, parseTap(tapRaw).tests);
+  }
+}
+
+function syncTestItems(ctrl, tests) {
+  // Create or update one TestItem per test
+  for (const t of tests) {
+    const id = String(t.number);
+    let item = ctrl.items.get(id);
+    if (!item) {
+      item = ctrl.createTestItem(id, t.name);
+      // Optionally set item.uri to point to TEST.PAS
+      ctrl.items.add(item);
+    } else {
+      item.label = t.name;
+    }
+  }
+}
+
+function workspaceRoot() {
+  return vscode.workspace.workspaceFolders[0].uri.fsPath;
+}
+function tapOutputPath() {
+  return require('path').join(workspaceRoot(),
+    'games', 'corporate-ladder', 'build', 'TEST.TAP');
+}
+function tapOutputExists() {
+  return require('fs').existsSync(tapOutputPath());
+}
+
+module.exports = { activate };
+```
+
+The extension manifest (`package.json`) declares it as a test provider:
+
+```json
+{
+  "name": "tptest-adapter",
+  "displayName": "Turbo Pascal Test Adapter",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.59.0" },
+  "activationEvents": [
+    "workspaceContains:**/TEST.PAS"
+  ],
+  "contributes": {
+    "commands": []
+  },
+  "main": "./extension.js"
+}
+```
+
+`activationEvents: workspaceContains:**/TEST.PAS` means the extension activates automatically when VS Code opens a workspace containing a `TEST.PAS` file — no manual activation needed.
+
+### 8.4 The Makefile integration
+
+`make test` needs to both run the binary **and** save TAP output to a file the bridge can read, while still printing it to the terminal:
+
+```makefile
+TEST_EXE = build/TEST.EXE
+TAP_FILE = build/TEST.TAP
+
+test: $(TEST_EXE)
+    @echo "Running tests..."
+    dosbox -c "mount c ." \
+           -c "c:" \
+           -c "cd games\\corporate-ladder\\build" \
+           -c "TEST.EXE > TEST.TAP" \
+           -c "exit" -exit
+    @cat $(TAP_FILE)
+    @grep -q "^not ok" $(TAP_FILE) && exit 1 || exit 0
+```
+
+`cat` prints TAP to the terminal for human reading. The `grep` checks for any `not ok` lines and sets the exit code. The VS Code bridge reads `TEST.TAP` separately.
+
+### 8.5 What the VS Code experience looks like
+
+After wiring the extension:
+
+**Testing sidebar tree:**
+
+```text
+▼ Turbo Pascal Tests
+  ✓ world initialises to empty tiles
+  ✓ player starts at spawn position
+  ✗ collect dollar increases score
+```
+
+**Test output panel** (when the failing test is selected):
+
+```text
+FAIL: collect succeeds: expected True got False
+```
+
+**What works:**
+
+- Pass/fail icons per test in the sidebar
+- Test names populated from TAP output
+- Diagnostic messages on failures
+- Re-run all tests via the Run button
+
+**What does not work vs pytest:**
+
+- Sidebar does not populate until after the first `make test` run (no source scanning)
+- No "run single test in isolation" button — all tests run together
+- No inline gutter icons next to test procedures in the editor
+- No auto-refresh on save — must click Run explicitly
+
+### 8.6 Implementation phasing
+
+The bridge has three independently shippable layers. The course can adopt them incrementally:
+
+| Phase | What it delivers | Effort |
+| --- | --- | --- |
+| **Phase 1** | `make test` prints TAP to terminal; exit code for CI | Trivial — Makefile change only |
+| **Phase 2** | `tap-parser.js` parses TAP; human-readable summary script | ~50 lines of Node.js |
+| **Phase 3** | Full VS Code extension: sidebar tree + pass/fail icons | ~150 lines of Node.js + package.json |
+
+Phase 1 is sufficient for the course day. Phases 2 and 3 are enhancements for the reference implementation.
+
+---
+
+## 9. What to test: unit vs acceptance
 
 The course uses two complementary test types:
 
