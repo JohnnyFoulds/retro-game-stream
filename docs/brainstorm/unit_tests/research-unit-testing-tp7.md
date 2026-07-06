@@ -421,54 +421,105 @@ The bridge is the glue between `TEST.EXE`'s TAP output and the VS Code Testing s
 
 ```
 TEST.EXE (DOS binary)
-    │  TAP plain text on stdout
+    │  TAP plain text → build/TEST.TAP
     ▼
-tap-bridge.js  (Node.js — parses TAP, feeds VS Code Testing API)
+run-tests.py  (Python — invokes DOSBox, prints human-readable summary)
+    │  terminal output + non-zero exit on failure
+    ▼
+make test     (Makefile target — calls run-tests.py)
+
+                  separately, for VS Code only:
+    ▼
+tap-bridge.js  (Node.js — reads TEST.TAP, feeds VS Code Testing API)
     │  VS Code TestItem tree + TestRun results
     ▼
 VS Code Testing sidebar  (pass/fail icons, test tree, output panel)
 ```
 
+**Why Python for the runner and Node.js for the extension?**
+
+The VS Code extension host is a Node.js process — there is no Python binding to the VS Code API (`TestController`, `TestRun`, `TestItem`). That layer **must** be JavaScript. However, for everything that runs outside VS Code — invoking DOSBox, parsing TAP output, printing a terminal summary — Python is the better choice for this project: it is more likely to be present in the course environment than Node.js, the subprocess and file I/O idioms are more readable for a mixed audience, and `make test` calling a Python script is simpler to explain.
+
+The VS Code extension can therefore be thin: it calls `make test` (which writes `TEST.TAP` via Python), then reads that file and parses it. The TAP-parsing logic exists in both Python (for terminal use) and JavaScript (for the extension), but the parser is trivial enough (~40 lines each) that the duplication is not a problem.
+
 ### 8.1 Layer 1: running TEST.EXE and capturing TAP output
 
-`TEST.EXE` is a 16-bit DOS binary. On macOS and Linux it runs under **DOSBox** or **DOSBox-X**; on Windows it runs natively or under DOSBox. The bridge script needs to launch the binary, capture stdout, and get the exit code.
+`TEST.EXE` is a 16-bit DOS binary. On macOS and Linux it runs under **DOSBox** or **DOSBox-X**; on Windows it runs natively or under DOSBox. The primary runner is a Python script that invokes DOSBox, reads the output file, and prints a human-readable summary with a non-zero exit code on failure.
 
-**Option A — DOSBox with `-exit` flag (simplest):**
+**Recommended: `tools/run-tests.py` (Python)**
 
-```bash
-# run-tests.sh — wraps DOSBox, captures TAP output
-dosbox -c "mount c ." \
-       -c "c:" \
-       -c "cd games\\corporate-ladder\\build" \
-       -c "TEST.EXE > TAP.TXT" \
-       -c "exit" \
-       -exit
+```python
+# tools/run-tests.py
+# Invoke TEST.EXE via DOSBox, parse TAP output, and report results.
+# Exit code: 0 = all passed, 1 = failures present.
 
-cat games/corporate-ladder/build/TAP.TXT
+import subprocess
+import sys
+import re
+import os
+
+TAP_PATH = os.path.join('games', 'corporate-ladder', 'build', 'TEST.TAP')
+
+def run_dosbox():
+    subprocess.run([
+        'dosbox',
+        '-c', 'mount c .',
+        '-c', 'c:',
+        '-c', r'cd games\corporate-ladder\build',
+        '-c', 'TEST.EXE > TEST.TAP',
+        '-c', 'exit',
+        '-exit',
+    ], check=True)
+
+def parse_and_report(tap):
+    passed = 0
+    failed = 0
+    for line in tap.splitlines():
+        m = re.match(r'^(ok|not ok)\s+(\d+)\s+(.*)', line)
+        if m:
+            status, num, name = m.groups()
+            icon = 'PASS' if status == 'ok' else 'FAIL'
+            print(f'  [{icon}] {num} {name}')
+            if status == 'ok':
+                passed += 1
+            else:
+                failed += 1
+        elif line.startswith('#'):
+            print(f'       {line}')
+    print()
+    print(f'{passed} passed, {failed} failed')
+    return failed
+
+def main():
+    print('Running Turbo Pascal tests...')
+    run_dosbox()
+    tap = open(TAP_PATH).read()
+    failures = parse_and_report(tap)
+    sys.exit(1 if failures > 0 else 0)
+
+if __name__ == '__main__':
+    main()
 ```
 
-DOSBox redirects stdout inside DOS to a file; the bridge script reads that file after DOSBox exits.
+Terminal output from `make test`:
 
-**Option B — js-dos (browser / Electron context):**
+```text
+Running Turbo Pascal tests...
+  [PASS] 1 world initialises to empty tiles
+  [PASS] 2 player starts at spawn position
+  [FAIL] 3 collect dollar increases score
+       # FAIL: collect succeeds: expected True got False
 
-js-dos exposes a JavaScript API that can capture the virtual console output as a string. The bridge script passes this string directly to the TAP parser — no file needed:
-
-```javascript
-// Conceptual — js-dos API
-const { Dos } = require('js-dos');
-const dos = await Dos(canvas);
-const ci = await dos.run('TEST.EXE');
-const tapOutput = await ci.captureStdout();
-await ci.exit();
-parseTap(tapOutput);
+2 passed, 1 failed
 ```
 
-**Option C — native DOS on Windows:**
+#### Alternative: native DOS on Windows
 
 On Windows, `TEST.EXE` runs natively:
 
 ```batch
-games\corporate-ladder\build\TEST.EXE > TAP.TXT
+games\corporate-ladder\build\TEST.EXE > build\TEST.TAP
+python tools\run-tests.py
 ```
 
 The Makefile handles platform detection and uses the right option. For the course, DOSBox is assumed as the primary platform.
@@ -689,17 +740,10 @@ TEST_EXE = build/TEST.EXE
 TAP_FILE = build/TEST.TAP
 
 test: $(TEST_EXE)
-    @echo "Running tests..."
-    dosbox -c "mount c ." \
-           -c "c:" \
-           -c "cd games\\corporate-ladder\\build" \
-           -c "TEST.EXE > TEST.TAP" \
-           -c "exit" -exit
-    @cat $(TAP_FILE)
-    @grep -q "^not ok" $(TAP_FILE) && exit 1 || exit 0
+    python3 tools/run-tests.py
 ```
 
-`cat` prints TAP to the terminal for human reading. The `grep` checks for any `not ok` lines and sets the exit code. The VS Code bridge reads `TEST.TAP` separately.
+`run-tests.py` handles invoking DOSBox, writing `TEST.TAP`, printing the human-readable summary, and exiting with a non-zero code on failure. The VS Code extension reads `TEST.TAP` separately after `make test` completes.
 
 ### 8.5 What the VS Code experience looks like
 
@@ -738,13 +782,13 @@ FAIL: collect succeeds: expected True got False
 
 The bridge has three independently shippable layers. The course can adopt them incrementally:
 
-| Phase | What it delivers | Effort |
-| --- | --- | --- |
-| **Phase 1** | `make test` prints TAP to terminal; exit code for CI | Trivial — Makefile change only |
-| **Phase 2** | `tap-parser.js` parses TAP; human-readable summary script | ~50 lines of Node.js |
-| **Phase 3** | Full VS Code extension: sidebar tree + pass/fail icons | ~150 lines of Node.js + package.json |
+| Phase | What it delivers | Effort | Language |
+| --- | --- | --- | --- |
+| **Phase 1** | `make test` calls `run-tests.py`; TAP to terminal; non-zero exit on failure | ~50 lines | Python |
+| **Phase 2** | Human-readable summary with pass/fail icons; `TEST.TAP` written for downstream use | included in Phase 1 | Python |
+| **Phase 3** | Full VS Code extension: sidebar tree + pass/fail icons; reads `TEST.TAP` | ~150 lines + `package.json` | Node.js |
 
-Phase 1 is sufficient for the course day. Phases 2 and 3 are enhancements for the reference implementation.
+Phase 1 is sufficient for the course day. Phase 3 is an enhancement for the reference implementation — it requires Node.js only because the VS Code extension host is Node.js; the Python runner already does everything needed for terminal and CI use.
 
 ---
 
