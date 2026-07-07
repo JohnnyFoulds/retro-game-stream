@@ -112,7 +112,7 @@ The specification is always authoritative. The AI proposes; the human accepts or
 
 ## Agent operating protocol
 
-For any implementation task in this repository, follow this protocol:
+### For game implementation tasks
 
 1. Identify the requirement ID.
 2. Verify the requirement exists in the game's `docs/requirements.md`.
@@ -125,6 +125,39 @@ For any implementation task in this repository, follow this protocol:
 9. Propose a commit message in the format above.
 10. Do not commit without explicit human approval.
 
+### For utility implementation tasks (`utils/`)
+
+Follow the same protocol, substituting the utility's own SDD documents:
+
+1. Identify the requirement ID from `utils/<name>/docs/requirements.md`.
+2. Verify the design contract exists in `utils/<name>/docs/technical-design.md`.
+3. Utility ADRs live in `utils/<name>/docs/decisions/` and are numbered `ADR-U-NNNN`. They must never be placed in `docs/decisions/`, which is reserved for game and course decisions.
+4. Steps 4–10 are identical to the game protocol above.
+
+### License headers
+
+Every new source file — Pascal (`.PAS`) or Python (`.py`) — must carry an MPL 2.0
+header as the first lines of the file.
+
+Python:
+
+```python
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Source: https://github.com/JohnnyFoulds/retro-game-stream
+```
+
+Pascal:
+
+```pascal
+{ This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  Source: https://github.com/JohnnyFoulds/retro-game-stream }
+```
+
 ### Never do the following
 
 - Rewrite the whole project
@@ -133,6 +166,8 @@ For any implementation task in this repository, follow this protocol:
 - Commit without review
 - Publish a broken build
 - Add game-specific details to this file or README — those belong in the game's brainstorm folder
+- Place utility ADRs in `docs/decisions/`
+- Create source files without the MPL 2.0 license header
 
 ---
 
@@ -142,10 +177,14 @@ For any implementation task in this repository, follow this protocol:
 retro-game-stream/
   README.md
   CLAUDE.md                        ← this file
+  LICENSE                          ← Mozilla Public License 2.0
   docs/
     brainstorm/                    ← design notes per game candidate
       corporate-ladder/            ← current target game design
-    decisions/                     ← Architecture Decision Records
+      utils/                       ← brainstorm notes for utility tools
+        stream-music/              ← generative CA music engine (prototype)
+        piano-stream/              ← SDD plan for piano stream utility
+    decisions/                     ← Architecture Decision Records (game + course only)
     standards/                     ← project standards
     course/                        ← instructor-facing course materials
   games/
@@ -153,7 +192,12 @@ retro-game-stream/
       build/                       ← build logs and manifest
       public/                      ← browser play page
       src/                         ← Pascal source files
-      src-baseline/                ← vibe-code baseline source (Module 0)
+      tests/                       ← acceptance tests
+    corporate-ladder-baseline/     ← vibe-code baseline source (Module 0)
+  utils/
+    piano-stream/                  ← procedural grand piano music generator
+      docs/                        ← feature spec, requirements, ADRs
+        decisions/                 ← utility-scoped ADRs (ADR-U-NNNN)
       tests/                       ← acceptance tests
 ```
 

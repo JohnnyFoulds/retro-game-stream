@@ -73,10 +73,14 @@ Vibe coding minimises `T_generation` but inflates the downstream terms. SDD inve
 
 ```
 retro-game-stream/
+  LICENSE                         — Mozilla Public License 2.0
   docs/
     brainstorm/                   — raw design notes per game candidate
       corporate-ladder/           — current target game design
-    decisions/                    — Architecture Decision Records
+      utils/                      — brainstorm notes for utility tools
+        stream-music/             — generative CA music engine (prototype)
+        piano-stream/             — SDD plan for piano stream utility
+    decisions/                    — Architecture Decision Records (game + course only)
     standards/                    — project standards (ADR format, etc.)
     course/                       — instructor-facing course materials
   games/
@@ -84,7 +88,11 @@ retro-game-stream/
       build/                      — build logs and manifest
       public/                     — browser play page
       src/                        — Pascal source files
-      src-baseline/               — vibe-code baseline source (Module 0)
+      tests/                      — acceptance tests
+    corporate-ladder-baseline/    — vibe-code baseline source (Module 0)
+  utils/
+    piano-stream/                 — procedural grand piano music generator
+      docs/                       — feature spec, requirements, ADRs
       tests/                      — acceptance tests
 ```
 
@@ -104,3 +112,9 @@ retro-game-stream/
 No prior experience with the chosen language required. The long-term vision is that **anyone** — including executives — can use the SDD loop to build small personal tools and automation, and in doing so gain genuine insight into what software engineers navigate every day.
 
 The pilot focuses on technical employees to iron out delivery problems first. Once stable, the course is open to everyone.
+
+---
+
+## License
+
+This project is licensed under the [Mozilla Public License 2.0](LICENSE). You may use, modify, and distribute this work — including commercially — provided that modifications to covered files are released under the same license. See [LICENSE](LICENSE) for the full terms.
