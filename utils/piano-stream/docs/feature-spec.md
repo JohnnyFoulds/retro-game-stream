@@ -209,6 +209,89 @@ the lowest melody note at every step.
 
 The synthesis method is **Karplus-Strong physical modelling** (decided in ADR-U-0002).
 
+#### What Karplus-Strong synthesis is
+
+A real piano string vibrates when a hammer strikes it. That vibration is not a
+pure sine wave — it is a complex mixture of the fundamental frequency and many
+harmonics (integer multiples of that frequency), all decaying at different rates.
+Replicating this mathematically is the job of the synthesis engine.
+
+Karplus-Strong (named after Kevin Karplus and Alex Strong, 1983) simulates a
+vibrating string using a simple feedback loop:
+
+```text
+┌─────────────────────────────────────┐
+│                                     │
+│   noise burst                       │
+│   (hammer strike)                   │
+│        │                            │
+│        ▼                            │
+│   ┌─────────────────────────┐       │
+│   │  delay line (N samples) │◄──────┤
+│   └─────────────────────────┘       │
+│        │                            │
+│        ▼                            │
+│   low-pass filter                   │
+│   (average two adjacent samples)    │
+│        │                            │
+│        ├───────────────────────────►│  (feedback — output is also
+│        │                             │   written back into the delay line)
+│        ▼
+│   audio output sample
+```
+
+Step by step:
+
+1. **Initialise** — fill a short buffer (the "delay line") with random noise.
+   The length of this buffer determines the pitch: a buffer of N samples at
+   44100 Hz produces a note whose fundamental frequency is 44100 / N Hz.
+   For middle C (261.6 Hz), N ≈ 169 samples — about 3.8 milliseconds of
+   audio. The noise burst represents the chaotic energy of a hammer strike.
+
+2. **Each sample** — read two adjacent values from the buffer, average them,
+   and write the result back. Output this averaged value as the next audio
+   sample, then advance one position around the buffer.
+
+3. **What emerges** — the averaging filter is a simple low-pass filter. Each
+   time the signal travels around the loop, the high-frequency components
+   are attenuated slightly and the low-frequency components (the fundamental
+   and lower harmonics) survive longer. After a few hundred loops the noise
+   has self-organised into a tone with a clear pitch and a natural harmonic
+   structure — exactly what a string does.
+
+4. **Why it decays** — every averaging step removes a little energy. The
+   signal gets quieter and simpler over time, eventually reaching silence.
+   High harmonics disappear first (they are smoothed out most aggressively),
+   leaving a warm, fading fundamental — the characteristic sound of a piano
+   note dying away.
+
+The result sounds convincingly like a plucked or struck string because it
+*is* a physical simulation of one, just expressed in 10 lines of arithmetic
+rather than a differential equation.
+
+**Why it is better than the alternative (additive synthesis) for this project:**
+Additive synthesis would build the same note by explicitly summing sine waves
+at each harmonic frequency — fundamental + 2nd harmonic + 3rd harmonic + …
+each with its own manually-chosen amplitude and decay rate. Getting it to sound
+like a piano requires careful tuning of dozens of parameters, and the result
+often sounds "thin" or electronic. Karplus-Strong produces the same harmonic
+structure automatically as a consequence of the physics — no manual tuning of
+individual harmonics needed. See ADR-U-0002 for the full decision record.
+
+```mermaid
+xychart-beta
+    title "Energy by harmonic over time — Karplus-Strong decay"
+    x-axis ["t=0 (attack)", "t=100ms", "t=300ms", "t=600ms", "t=1s"]
+    y-axis "Relative amplitude" 0 --> 1
+    line [1.0, 0.85, 0.55, 0.25, 0.05]
+    line [1.0, 0.60, 0.20, 0.04, 0.00]
+    line [1.0, 0.35, 0.06, 0.01, 0.00]
+```
+
+*Fundamental (top line) survives longest; 2nd harmonic (middle) fades faster;
+3rd harmonic (bottom) is almost gone by 300ms — consistent with real piano
+physics where treble content decays faster than the fundamental.*
+
 The synthesis engine produces a waveform with the following observable properties:
 
 1. **Attack transient** — a sharp amplitude peak within the first 10ms of the
