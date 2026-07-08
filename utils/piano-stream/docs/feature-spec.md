@@ -7,6 +7,7 @@
 | 2026-07-07 | Initial draft | Session 1 |
 | 2026-07-08 | Resolve all TBD items; fix FR-11, FR-7, `compute_velocity`, buffer model, DJ discovery | Session 2 |
 | 2026-07-08 | Consistency audit fixes: FR-13 wording, `synthesise_note` rng param, `EngineState` concrete definition, RST docstrings in §3.5, add `ATTACK_SCALE`/`REST_PROBABILITY`/`PHRASE_SHORT`/`PHRASE_LONG` constants, add `logging`/`dataclasses` to §3.6 | Session 3 |
+| 2026-07-08 | Add §2.12 engine architecture: state machine diagram, CA/rule flowchart, LSTM comparison table and diagram, three-timescale gantt; add bar-level state (`bar_note_count`, `bar_net_direction`) and soft phrase reset; add `BAR_DIRECTION_DESCENT_THRESHOLD`, `BAR_SPARSE_THRESHOLD` constants | Session 4 |
 
 ---
 
@@ -403,6 +404,195 @@ velocity = clamp(v_struct + v_phrase + v_noise, VELOCITY_MIN, VELOCITY_MAX)
 `v_struct` provides the downbeat accent; `v_phrase` rises toward the phrase
 climax (highest note); `v_noise` prevents mechanical uniformity.
 
+### 2.12 Generative Engine Architecture
+
+This section explains how the generative engine works as a system — its state
+machine structure, the analogy to Long Short-Term Memory (LSTM) networks that
+informed two design improvements, and the three timescales it operates at.
+
+#### 2.12.1 The engine as a recurrent state machine
+
+The engine is a deterministic recurrent state machine. At every step it reads
+`EngineState`, produces musical events, and writes the next `EngineState`. No
+mutable global variables exist outside this struct.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    [*] --> Idle : initialise_engine(seed)
+
+    Idle --> StepActive : main loop tick
+
+    state StepActive {
+        direction TB
+        [*] --> AdvanceCA    : advance_engine()
+        AdvanceCA --> SelectNotes : ca_row evolved
+        SelectNotes --> ComputeVelocity
+        ComputeVelocity --> Synthesise
+        Synthesise --> Mix
+        Mix --> UpdateBarState
+        UpdateBarState --> CheckPhraseBoundary
+        CheckPhraseBoundary --> [*]
+    }
+
+    StepActive --> StepActive : next step
+    StepActive --> Idle       : bars limit reached or fade-out complete
+    Idle --> [*]              : exit
+```
+
+The main loop is the outermost `StepActive → StepActive` cycle. Each iteration
+is one 16th note. The inner sequence within a step is strictly ordered: the CA
+must be advanced before notes are selected, and notes must be selected before
+velocity is computed.
+
+#### 2.12.2 The two layers: CA and rules
+
+The engine separates *when* from *what*. The CA layer decides when events
+fire; the rule layer decides what note is chosen when they do.
+
+```mermaid
+flowchart TD
+    seed["--seed string"] --> init["initialise_engine()"]
+    init --> ca["CA row (32 bits)"]
+    init --> rng["seeded RNG"]
+
+    ca --> |"evolve via Wolfram rule"| ca
+    ca --> |"bit[MELODY_GATE]"| mg{"melody\ngate open?"}
+    ca --> |"bit[ACCOMP_GATE]"| ag{"accomp\ngate open?"}
+    ca --> |"bit[PHRASE_BIT]"| pb{"phrase\nboundary?"}
+
+    mg --> |"yes"| rules["Rule layer:\npick chord tone\nwithin interval limit"]
+    mg --> |"no"| rest["rest (silence)"]
+
+    rules --> |"constrained by"| prev["prev_melody_note\n(MAX_MELODY_INTERVAL)"]
+    rules --> |"biased by"| barstate["bar_net_direction\nbar_note_count"]
+    rules --> |"leap allowed"| pb
+
+    ag --> |"beat 1: always fire"| bass["bass root note\n(FR-14 override)"]
+    ag --> |"other beats"| pattern["accompaniment pattern\n(per mood)"]
+
+    rules --> note["MIDI note"]
+    bass --> note
+    pattern --> note
+
+    note --> vel["compute_velocity()\n3-layer model"]
+    rng --> vel
+    vel --> synth["synthesise_note()\nKarplus-Strong"]
+    rng --> synth
+    synth --> mix["mix_and_limit()"]
+    mix --> speaker["audio output"]
+    mix --> midi["MIDI recorder"]
+```
+
+The CA is the source of non-repetition. The rules are the source of musical
+coherence. Neither layer alone produces music: a bare CA produces irregular
+noise; bare rules without a stochastic driver converge on repeated patterns.
+
+#### 2.12.3 Comparison with LSTM
+
+The structural similarity to an LSTM is not coincidental — both architectures
+solve the same problem: producing coherent sequences over time without losing
+relevant context. The table below maps the concepts directly.
+
+| Concept | LSTM | This engine |
+| --- | --- | --- |
+| **Recurrent hidden state** | `h_t` — transforms every step, fed back as input to step `t+1` | `ca_row` — evolved by the Wolfram rule every step |
+| **Long-term cell state** | `c_t` — carries context across many steps via the forget gate | `phrase_high_note`, `phrase_length` — persist across 64–128 steps |
+| **Short-term state** | `h_t` — resets faster than `c_t` | `prev_melody_note` — resets at phrase boundaries |
+| **Gates** | Input / forget / output gates (learned 0–1 scalars) | CA bit positions literally called gates — open or close note firing each step |
+| **Multiple timescales** | Cell state changes slowly; hidden state changes every step | Phrase counters change every 64–128 steps; CA changes every step |
+| **Weights** | Learned via backpropagation from training data | Hand-authored compositional rules |
+| **Non-repetition** | Emergent from learned distributions | Inherent in the CA's aperiodic dynamics |
+
+```mermaid
+flowchart LR
+    subgraph LSTM
+        direction TB
+        ht1["h_t"] -->|"gates"| ht2["h_{t+1}"]
+        ct1["c_t"] -->|"forget gate\n(soft, 0–1)"| ct2["c_{t+1}"]
+        ht1 --> ct2
+        ct1 --> ht2
+    end
+
+    subgraph Engine
+        direction TB
+        ca1["ca_row_t"] -->|"Wolfram rule\n(hard, binary)"| ca2["ca_row_{t+1}"]
+        ph1["phrase_high_note\nphrase_length\nbar_state"] -->|"phrase boundary\n(hard reset + decay)"| ph2["phrase_high_note'\nphrase_length'\nbar_state'"]
+        ca1 --> ph2
+        ph1 --> ca2
+    end
+```
+
+The key difference is the forget gate. An LSTM forgets gradually (a learned
+scalar between 0 and 1 multiplies the cell state each step). This engine
+previously used a hard reset at phrase boundaries. The design was updated
+to use a *decay* instead — see §2.12.4.
+
+#### 2.12.4 Three timescales and the bar-level improvement
+
+Comparing the engine to an LSTM revealed a missing intermediate timescale.
+Music has at least three levels at which the ear judges whether it has
+*direction*:
+
+```mermaid
+gantt
+    title Musical timescales in the engine
+    dateFormat  X
+    axisFormat  step %s
+
+    section Step level (CA)
+    CA row evolves        : active, 0, 1
+    Note gate fires       : 0, 1
+
+    section Bar level (new)
+    bar_note_count resets : milestone, 0, 0
+    bar_net_direction     : active, 0, 16
+
+    section Phrase level
+    Phrase shape active   : active, 0, 64
+    Phrase resets         : milestone, 64, 64
+```
+
+The original design had only step and phrase. The bar level was absent, meaning
+the engine had no way to notice that a bar was rhythmically sparse (too many
+rests) or melodically one-directional (always ascending) and compensate.
+
+Two fields were added to `EngineState` to fill this gap (see §3.5):
+
+- `bar_note_count` — melody notes fired in the current bar; reset at step 0 of
+  each bar. If this is below `BAR_SPARSE_THRESHOLD` at step 12, the rest
+  probability is suppressed for the remaining 4 steps so bars cannot be almost
+  entirely silent.
+- `bar_net_direction` — running sum of semitone intervals this bar (positive =
+  ascending). If this exceeds `BAR_DIRECTION_DESCENT_THRESHOLD`, the rule layer
+  biases note selection toward lower chord tones, providing melodic gravity.
+
+#### 2.12.5 Soft phrase reset (the forget gate improvement)
+
+The original design reset `phrase_high_note` to 0 at every phrase boundary —
+equivalent to an LSTM forget gate that is always exactly 0 (wipe everything).
+This made phrase transitions feel disconnected: the velocity shape of the new
+phrase started from scratch regardless of where the previous phrase ended.
+
+The updated design decays rather than wipes:
+
+```python
+# at phrase boundary — decay, not reset
+state.phrase_high_note = state.phrase_high_note // 2
+```
+
+This means a phrase that ended high carries a non-zero baseline into the next
+phrase. The velocity shape of the new phrase starts at half the climax of the
+previous one, then either continues climbing or resolves downward. This is the
+behaviour of a human pianist crossing a phrase boundary — there is continuity,
+not amnesia.
+
+The decay factor of `// 2` (50%) was chosen because it produces convergence:
+after two quiet phrases following a climax at MIDI 84, the baseline reaches
+21 — comfortably in the low-velocity zone. A smaller decay would linger too
+long; a full reset would produce the disconnection described above.
+
 ---
 
 ## 3. Technical Specification
@@ -507,6 +697,8 @@ for a realistic piano texture.
 | `PHRASE_SHORT` | `64` | Short phrase length in steps (4 bars × 16 steps) |
 | `PHRASE_LONG` | `128` | Long phrase length in steps (8 bars × 16 steps) |
 | `REST_PROBABILITY` | `0.20` | Default probability of a melody rest on any given step (§2.4) |
+| `BAR_DIRECTION_DESCENT_THRESHOLD` | `4` | If `bar_net_direction` exceeds this (semitones net upward), bias next note selection downward (§2.12) |
+| `BAR_SPARSE_THRESHOLD` | `3` | If `bar_note_count` is below this at step 12 of a bar, suppress rest probability for remaining steps (§2.12) |
 | `FADE_OUT_BARS` | `4` | Fixed fade-out duration for DJ crossfade |
 
 ### 3.5 Function Signatures
@@ -678,6 +870,9 @@ class EngineState:
     phrase_step: int         # steps elapsed in the current phrase (0-indexed)
     phrase_length: int       # phrase length in steps (PHRASE_SHORT or PHRASE_LONG)
     phrase_high_note: int    # highest melody note seen this phrase (velocity shaping)
+    # --- bar-level state (§2.12 intermediate timescale) ---
+    bar_note_count: int      # melody notes fired in the current bar; reset every 16 steps
+    bar_net_direction: int   # sum of semitone intervals this bar (+ ascending, - descending)
     rng: random.Random       # seeded RNG instance; initialised from --seed
 ```
 
@@ -747,6 +942,9 @@ Remaining open items require implementation-phase decisions.
 | Velocity layer weights | §2.11 velocity model | ✓ Defined in §2.11 (ADR-U-0003) |
 | `NOTE_DECAY_FACTOR` per register | §3.4 constants table | Open — tuned by ear during implementation |
 | `ATTACK_SCALE` value | §2.5, §3.4 constants table | Open — must be ≥ 2× sustain; tuned during implementation |
+| `BAR_DIRECTION_DESCENT_THRESHOLD` value | §2.12.4, §3.4 | Open — default 4 semitones; tuned during implementation |
+| `BAR_SPARSE_THRESHOLD` value | §2.12.4, §3.4 | Open — default 3 notes; tuned during implementation |
+| Phrase reset decay factor | §2.12.5 | Open — `// 2` (50%) is the baseline; may be tuned during implementation |
 | `drive` constant for soft-clip | §2.6 mixer | Open — tuned during implementation |
 | Stereo vs mono output | §2.6, §3.4 channels | Open — mono for now; stereo deferred |
 | DJ discovery (`ca_synth*.py` glob) | §2.8 note | Open — symlink `ca_synth_piano.py` is the simplest fix; deferred to integration phase |
