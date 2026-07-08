@@ -108,6 +108,23 @@ captures the same events independently. The two output paths share the same
 musical decisions but are otherwise decoupled — synthesis quality improvements
 do not affect MIDI output, and MIDI feature additions do not affect audio quality.
 
+**The audio path generates sound from scratch — there is no piano sample or
+sound card patch involved.** The synthesis engine computes 44,100 raw numbers
+per second (PCM audio samples) using the Karplus-Strong algorithm (§2.5) and
+writes them directly to the speaker via `sounddevice`. The result *is* the
+piano sound — no external instrument, soundfont, or MIDI voice is consulted.
+
+The MIDI path is entirely separate and serves a different purpose. MIDI is not
+audio — it is a structured log of musical events: "note 60 on at time 1.0,
+velocity 80, off at time 1.25." The MIDI file written by `--out_midi` contains
+no sound of its own. It is a record of what was played, which a DAW or a DOS
+game can replay later through *its own* instrument (a software piano, a GM
+soundfont, an OPL2 FM chip — whatever the playback environment provides). The
+quality and character of that playback is entirely outside the script's control.
+
+In short: the script is its own synthesiser for live audio, and a notation
+writer for MIDI export. The two paths run in parallel but are independent.
+
 The script is intentionally scoped to **piano only**. It does not inherit the
 multi-genre architecture of `ca_synth.py`. There are no drum voices, no bass
 synthesisers other than the piano bass register, and no non-piano timbres.
