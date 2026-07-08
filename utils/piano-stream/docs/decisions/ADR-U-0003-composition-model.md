@@ -75,6 +75,8 @@ class EngineState:
     phrase_step: int        # steps elapsed in the current phrase (0-indexed)
     phrase_length: int      # phrase length in steps (64 or 128; selected at phrase boundary)
     phrase_high_note: int   # highest melody note seen in this phrase (for velocity shaping)
+    bar_note_count: int     # melody notes fired in the current bar; reset every 16 steps
+    bar_net_direction: int  # sum of semitone intervals this bar (+ ascending, - descending)
     rng: random.Random      # seeded RNG instance for stochastic elements
 ```
 
@@ -119,7 +121,7 @@ enough to prevent monotony over a 30-minute run.
 The three velocity layers are combined as:
 
 ```
-v_struct  = structural accent component (beat 1 → 90, beat 3 → 75, others → 60)
+v_struct  = structural accent component (beat 1 → 90, beats 2/3/4 → 75, sub-beats → 60)
 v_phrase  = phrase shape component (0–20, peaks at phrase climax bar)
 v_noise   = rng.randint(-10, 10)  (from EngineState.rng)
 velocity  = clamp(v_struct + v_phrase + v_noise, VELOCITY_MIN, VELOCITY_MAX)

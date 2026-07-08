@@ -8,6 +8,7 @@
 | 2026-07-08 | Resolve all TBD items; fix FR-11, FR-7, `compute_velocity`, buffer model, DJ discovery | Session 2 |
 | 2026-07-08 | Consistency audit fixes: FR-13 wording, `synthesise_note` rng param, `EngineState` concrete definition, RST docstrings in §3.5, add `ATTACK_SCALE`/`REST_PROBABILITY`/`PHRASE_SHORT`/`PHRASE_LONG` constants, add `logging`/`dataclasses` to §3.6 | Session 3 |
 | 2026-07-08 | Add §2.12 engine architecture: state machine diagram, CA/rule flowchart, LSTM comparison table and diagram, three-timescale gantt; add bar-level state (`bar_note_count`, `bar_net_direction`) and soft phrase reset; add `BAR_DIRECTION_DESCENT_THRESHOLD`, `BAR_SPARSE_THRESHOLD` constants | Session 4 |
+| 2026-07-08 | Add KS explanation to §2.5 (step-by-step walkthrough, feedback-loop diagram, xychart harmonic decay, additive synthesis comparison); add audio-vs-MIDI clarification paragraph to §2.1; consistency audit fixes: T-004 phrase boundary wording, advance_engine and select_melody_note docstrings, §2.11 phrase-decay cross-reference, §2.12.4 provisional note, §3.8 bar-level validation entry | Session 5 |
 
 ---
 
@@ -320,6 +321,8 @@ The synthesis engine produces a waveform with the following observable propertie
 3. **Exponential decay** — amplitude must decay to ≤10% of peak within
    `NOTE_DECAY_MS` milliseconds. `NOTE_DECAY_MS` varies by register: lower
    notes decay more slowly than higher notes, consistent with piano physics.
+   (`NOTE_DECAY_MS` is a per-register test criterion, not a named constant in
+   §3.4; the implementation mechanism is `NOTE_DECAY_FACTOR` — see §3.4.)
 4. **No sustained tone** — unlike a sine bell or organ, the note must reach
    near-silence before the next note in the same voice begins (unless a
    sustain/pedal effect is explicitly modelled).
@@ -504,6 +507,11 @@ velocity = clamp(v_struct + v_phrase + v_noise, VELOCITY_MIN, VELOCITY_MAX)
 `v_struct` provides the downbeat accent; `v_phrase` rises toward the phrase
 climax (highest note); `v_noise` prevents mechanical uniformity.
 
+> **Note:** `phrase_high_note` (used in the `v_phrase` condition above) is
+> decayed by integer division at phrase boundaries (`// 2`) rather than
+> reset to zero — see §2.12.5. This means the phrase climax "memory" fades
+> gradually rather than snapping off.
+
 ### 2.12 Generative Engine Architecture
 
 This section explains how the generative engine works as a system — its state
@@ -668,6 +676,12 @@ Two fields were added to `EngineState` to fill this gap (see §3.5):
   ascending). If this exceeds `BAR_DIRECTION_DESCENT_THRESHOLD`, the rule layer
   biases note selection toward lower chord tones, providing melodic gravity.
 
+> **Provisional — validate before implementing.** These fields were added based
+> on the LSTM structural analogy. Whether they produce a meaningfully better
+> result than the two-timescale (step + phrase) design is untested. Implement the
+> two-timescale version first; add bar-level state only if a listen test
+> identifies rhythmic monotony or directional drift as actual problems. See §3.8.
+
 #### 2.12.5 Soft phrase reset (the forget gate improvement)
 
 The original design reset `phrase_high_note` to 0 at every phrase boundary —
@@ -827,10 +841,14 @@ def advance_engine(state: EngineState) -> EngineState:
 
     Applies the Wolfram CA rule to state.ca_row, increments step and
     phrase_step, and fires a phrase boundary if the CA and MIN_PHRASE_BARS
-    conditions are met. Called exactly once per step in the main loop.
+    conditions are met. Also resets bar_note_count and bar_net_direction at
+    step 0 of each bar (every 16 steps). At phrase boundaries, decays
+    phrase_high_note by ``// 2`` rather than resetting to zero (§2.12.5).
+    Called exactly once per step in the main loop.
 
     :param state: Current engine state.
-    :returns:     New engine state with ca_row, step, and phrase counters updated.
+    :returns:     New engine state with ca_row, step, phrase counters,
+                  bar counters, and phrase_high_note updated.
     """
 
 def select_melody_note(
@@ -851,7 +869,8 @@ def select_melody_note(
     Returns None when the gate is closed (rest) or when REST_PROBABILITY
     fires, which the caller should treat as silence for this step.
 
-    :param state:       Current engine state (ca_row and rng are read).
+    :param state:       Current engine state (ca_row, rng, bar_note_count,
+                        and bar_net_direction are read).
     :param chord:       MIDI note numbers of the current chord.
     :param prev_note:   Last melody note played, or None at phrase start.
     :param step_in_bar: 0-based step index within the current bar (0–15).
@@ -1014,7 +1033,7 @@ following are the primary observable criteria referenced in §1:
 | T-001 | FR-1, NFR-7 | Script starts and produces audio within 2 seconds |
 | T-002 | BR-1, NFR-7 | A listener identifies the output as piano music within 10 seconds |
 | T-003 | FR-2, FR-5 | Same `--seed` value produces identical output on two separate runs |
-| T-004 | FR-13 | Inspecting MIDI export shows no consecutive melody notes more than 7 semitones apart (except at bar boundaries) |
+| T-004 | FR-13 | Inspecting MIDI export shows no consecutive melody notes more than 7 semitones apart (except at phrase boundaries) |
 | T-005 | FR-14 | Every bar in the MIDI export contains at least one note below MIDI 60 on channel 1 |
 | T-006 | FR-15, FR-17 | MIDI export shows at least 3 distinct velocity values across any 16-bar passage |
 | T-007 | FR-16 | MIDI export contains program-change 0 on channel 0 and channel 1 at beat 0 |
@@ -1045,6 +1064,7 @@ Remaining open items require implementation-phase decisions.
 | `BAR_DIRECTION_DESCENT_THRESHOLD` value | §2.12.4, §3.4 | Open — default 4 semitones; tuned during implementation |
 | `BAR_SPARSE_THRESHOLD` value | §2.12.4, §3.4 | Open — default 3 notes; tuned during implementation |
 | Phrase reset decay factor | §2.12.5 | Open — `// 2` (50%) is the baseline; may be tuned during implementation |
+| Bar-level state overall necessity | §2.12.4, §3.5 EngineState | Open — validate by listen test before implementing; may prove unnecessary (see §2.12.4 provisional note) |
 | `drive` constant for soft-clip | §2.6 mixer | Open — tuned during implementation |
 | Stereo vs mono output | §2.6, §3.4 channels | Open — mono for now; stereo deferred |
 | DJ discovery (`ca_synth*.py` glob) | §2.8 note | Open — symlink `ca_synth_piano.py` is the simplest fix; deferred to integration phase |

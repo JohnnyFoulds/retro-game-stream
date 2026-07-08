@@ -474,7 +474,7 @@ Before committing any Python file:
 
 - [ ] MPL 2.0 license header is the first block in the file
 - [ ] All function signatures carry type hints (parameters and return type)
-- [ ] All public functions have a docstring in Sphinx/RST field format
+- [ ] All public and private functions have a docstring in Sphinx/RST field format
 - [ ] Module has a module-level docstring
 - [ ] All constants with domain meaning are named — no bare numeric literals in logic
 - [ ] All `logger.error()` calls at catch sites include `exc_info=True`
