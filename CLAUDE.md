@@ -11,6 +11,7 @@ This file is the operating guide for AI assistance on this project. Read it befo
 | Architecture Decision Records | [docs/standards/adr.md](docs/standards/adr.md) |
 | Git and source control | [docs/standards/git-standard.md](docs/standards/git-standard.md) |
 | Pascal coding style | [docs/standards/coding-standards.md](docs/standards/coding-standards.md) |
+| Python coding style | [docs/standards/python-standards.md](docs/standards/python-standards.md) |
 | Inline documentation | [docs/standards/documentation-standards.md](docs/standards/documentation-standards.md) |
 | Error handling | [docs/standards/error-handling.md](docs/standards/error-handling.md) |
 | Logging | [docs/standards/logging-standard.md](docs/standards/logging-standard.md) |

@@ -5,6 +5,7 @@
 | Date | Change | Triggered by |
 | --- | --- | --- |
 | 2026-07-07 | Initial draft | Session 1 |
+| 2026-07-08 | Resolve all TBD items; fix FR-11, FR-7, `compute_velocity`, buffer model, DJ discovery | Session 2 |
 
 ---
 
@@ -30,11 +31,11 @@
 | FR-4 | The script SHALL support a `--bpm` parameter controlling the tempo in beats per minute. |
 | FR-5 | The script SHALL support a `--seed` parameter accepting a text string that deterministically initialises the generative engine. |
 | FR-6 | The script SHALL support a `--volume` parameter controlling the master output level (0.0 to 1.0). |
-| FR-7 | The script SHALL support a `--bars` parameter that stops the script after exactly N bars and saves the MIDI file if `--out_midi` is set. When `--bars` is 0 the script runs indefinitely. |
+| FR-7 | The script SHALL support a `--bars` parameter. When N > 0, after N bars of music have been generated the script triggers the standard 4-bar fade-out (same mechanism as FR-10), then exits and saves the MIDI file if `--out_midi` is set. Total wall-clock runtime is therefore N + `FADE_OUT_BARS` bars. When `--bars` is 0 the script runs indefinitely. |
 | FR-8 | The script SHALL support a `--out_midi` parameter specifying a file path to which a MIDI file is written on exit. |
 | FR-9 | The script SHALL support a `--fade_in` parameter specifying the number of bars over which the master volume fades from 0 to full on startup, for use by the DJ crossfade system. |
 | FR-10 | The script SHALL respond to a `fade_<pid>.flag` file written by the DJ script by triggering a graceful fade-out and clean exit, compatible with `stream_dj.py` IPC protocol. |
-| FR-11 | The script SHALL display a terminal visualiser each step showing the current chord, active voices, and a representation of the generative state. |
+| FR-11 | The script SHALL display a terminal visualiser once per bar showing the current chord, active voices, and a representation of the generative state. Output per step would flood the terminal; bar-level granularity is sufficient for monitoring. |
 | FR-12 | The script SHALL generate a left-hand accompaniment part and a right-hand melody part, kept in separate pitch registers, mixed into a single mono or stereo audio stream. |
 | FR-13 | The melody voice SHALL move predominantly by stepwise motion (intervals of a second or third), with occasional larger leaps resolved by contrary motion. |
 | FR-14 | The bass / accompaniment voice SHALL place at least one note per bar on the downbeat, in a register at least one octave below the melody. |
@@ -60,12 +61,12 @@
 - The script targets a single output file: `utils/piano-stream/piano_stream.py`.
 - The script is a utility, not part of the game source. Pascal coding standards do not apply. Python 3.10+ conventions apply.
 - The DJ compatibility constraint (NFR-3) is non-negotiable: the flag-file IPC and `--fade_in` argument must work exactly as in `ca_synth.py`.
-- **MIDI target hardware:** *(TBD — ADR-U-0001)* The MIDI export format and feature set (velocity resolution, pitch bend, program change) will be finalised once the target DOS playback hardware is decided. Until then, the export targets General MIDI as the broadest compatible baseline.
-- **Piano synthesis approach:** *(TBD — ADR-U-0002)* The synthesis method — physical modelling (Karplus-Strong) vs. additive harmonic synthesis — has not been decided. This decision determines the implementation of FR-1 and NFR-7 entirely. Both approaches satisfy the requirements as stated; the ADR will record which is chosen and why.
-- **Composition model:** *(TBD — ADR-U-0003)* The generative mechanism driving note selection — CA-based (as in `ca_synth.py`), Markov chain, rule-based voice leading, or a hybrid — has not been decided. This decision determines how FR-2, FR-13, and FR-15 are implemented. The requirements are written to be model-agnostic; the ADR will record the choice.
+- **MIDI target hardware:** General MIDI — see [ADR-U-0001](decisions/ADR-U-0001-midi-target.md).
+- **Piano synthesis approach:** Karplus-Strong physical modelling — see [ADR-U-0002](decisions/ADR-U-0002-synthesis-approach.md).
+- **Composition model:** CA-gated rule-based hybrid — see [ADR-U-0003](decisions/ADR-U-0003-composition-model.md).
 - **Mood set:** The named moods and their chord progressions are not yet defined. They will be listed in §2.3 once the composition model (ADR-U-0003) is settled, as the chord voicings depend on the voice-leading approach.
 - **Stereo vs mono:** The `ca_synth.py` baseline is mono. Whether the piano output is mono or stereo is an open question. Stereo panning of melody vs. accompaniment is a significant quality improvement but adds output channel complexity. This will be decided during Phase 1 requirements authoring and reflected in §3.
-- **Python standards:** No formal Python coding standard has been defined for this utility. The script should follow PEP 8, use type hints on all function signatures, and carry docstrings on all public functions. A formal standard may be defined later.
+- **Python standards:** The project Python coding standard is defined in [docs/standards/python-standards.md](../../../../docs/standards/python-standards.md). All `.py` files in this utility must comply with it. Key requirements: PEP 8 baseline, 80-character line limit, type hints on all function signatures, Sphinx/RST docstrings on all public functions, `%s` log formatting, MPL 2.0 license header.
 - The script must not import any game-specific Pascal utilities or depend on any file in `games/`.
 - The `stream_dj.py` script discovers synth scripts by globbing `ca_synth*.py`. This script is named `piano_stream.py` and will therefore not be auto-discovered by the DJ unless the DJ is extended. DJ integration details are deferred to FR-10 and §2.7.
 
@@ -126,8 +127,9 @@ per iteration, generating exactly `samples_per_step` audio samples per iteration
 and writing them to the output stream.
 
 The harmonic rhythm (chord change frequency) is independent of the step clock.
-Chords change every `CHORD_DURATION_BARS` bars, which is a configurable constant.
-*(TBD — exact value depends on ADR-U-0003 composition model.)*
+Chords change every `CHORD_DURATION_BARS` bars. `CHORD_DURATION_BARS = 2`, giving
+a chord change every 32 steps. This is slow enough to feel compositional and fast
+enough to prevent monotony over a 30-minute run. (Decided in ADR-U-0003.)
 
 ### 2.3 Harmonic Framework
 
@@ -136,24 +138,30 @@ Each mood is a list of chords; each chord is a list of MIDI note numbers giving
 the root voicing. The progression cycles repeatedly. The melody and accompaniment
 voices both derive their note choices from the current chord.
 
-**Mood definitions:** *(TBD — ADR-U-0003)*
-The exact chord progressions for each mood will be defined once the composition
-model is decided. The moods will cover at minimum:
+**Mood definitions:** (decided in ADR-U-0003)
 
-| Mood | Character | Example progression |
-| --- | --- | --- |
-| `classical` | Formal, resolved | I → IV → V → I in major |
-| `romantic` | Expressive, chromatic | i → VI → III → VII in minor |
-| `nocturne` | Quiet, introspective | i → iv → V → i (Chopin-style minor) |
-| `waltz` | Light, dancing | I → V → V → I (3/4 feel within 4/4) |
-| `ragtime` | Syncopated, bright | I → IV → I → V in major |
-| `ambient` | Slow, open | Extended chords, slow harmonic rhythm |
+| Mood | Character | Progression | Example key |
+| --- | --- | --- | --- |
+| `classical` | Formal, resolved | I → IV → V → I (major) | C–F–G–C |
+| `romantic` | Expressive, chromatic | i → VI → III → VII (minor) | Am–F–C–G |
+| `nocturne` | Quiet, introspective | i → iv → V → i (minor) | Dm–Gm–A–Dm |
+| `waltz` | Light, dancing | I → V → V → I (major) | G–D–D–G |
+| `ragtime` | Syncopated, bright | I → IV → I → V (major) | F–Bb–F–C |
+| `ambient` | Slow, open | Imaj7 → IVmaj7 → iiim7 → vim7 | Fmaj7–Bbmaj7–Am7–Dm7 |
 
 The `--mood` default is `nocturne`.
 
-All chord voicings use MIDI note numbers. The root note of the progression is
-derived from the seed (deterministic) or from a fixed tonic. *(TBD — tonic
-selection strategy depends on ADR-U-0003.)*
+All chord voicings use MIDI note numbers in the accompaniment register. The root
+note of the progression is derived from the seed:
+
+```python
+import hashlib
+root = 48 + (int(hashlib.md5(seed.encode()).hexdigest(), 16) % 12)
+```
+
+Using `hashlib.md5` rather than Python's built-in `hash()` ensures the root is
+stable across Python versions and platforms. `hashlib` is a stdlib module; it
+requires no new package dependency. (Decided in ADR-U-0003.)
 
 ### 2.4 Voice Architecture
 
@@ -177,11 +185,18 @@ of piano music on the grand staff.
 - Register: MIDI notes 36–60 (C2 to middle C)
 - Role: harmonic support; bass note on beat 1 of each bar plus inner voices
   on subsequent beats
-- Pattern: *(TBD — ADR-U-0003)* options include:
-  - **Alberti bass** — root, fifth, third, fifth repeated (classical)
-  - **Broken chord** — root then upper chord tones arpeggiated
-  - **Sustained bass** — root on beat 1, chord on beats 2–4
-  - **Stride** — bass note alternating with mid-register chord (jazz/ragtime)
+- Pattern: selected per mood at startup; does not change within a run.
+  (Decided in ADR-U-0003.)
+
+  | Mood | Pattern |
+  | --- | --- |
+  | `classical` | Alberti bass — root, fifth, third, fifth |
+  | `romantic` | Broken chord — root up, then chord tones ascending |
+  | `nocturne` | Sustained bass — root on beat 1, chord on beats 2–4 |
+  | `waltz` | Stride — bass note alternates with mid-register chord |
+  | `ragtime` | Stride (fast) — bass on beats 1 and 3, chord on 2 and 4 |
+  | `ambient` | Sustained bass — whole-bar root, inner voices on beat 3 |
+
 - The accompaniment pattern is selected per mood, not per step
 
 The two voices are synthesised independently and summed. They must not overlap
@@ -190,10 +205,9 @@ the lowest melody note at every step.
 
 ### 2.5 Piano Synthesis
 
-*(TBD — ADR-U-0002 will determine which approach is implemented)*
+The synthesis method is **Karplus-Strong physical modelling** (decided in ADR-U-0002).
 
-The synthesis engine must produce a waveform with the following observable
-properties for any given note, regardless of approach:
+The synthesis engine produces a waveform with the following observable properties:
 
 1. **Attack transient** — a sharp amplitude peak within the first 10ms of the
    note, simulating hammer strike. The peak amplitude must be at least 2× the
@@ -210,17 +224,24 @@ properties for any given note, regardless of approach:
 5. **No audible aliasing** — the waveform must not produce clearly audible
    high-frequency artefacts above the intended harmonic content.
 
-Two candidate approaches will be evaluated in ADR-U-0002:
+**Implementation (Karplus-Strong):**
 
-**Option A — Additive synthesis**
-Sum the fundamental and harmonics as sine waves with individually decaying
-envelopes. Each partial has its own amplitude and decay rate. Computationally
-cheap, predictable, but can sound thin without careful harmonic weighting.
+1. On note-on, initialise a delay line of length `N = round(SAMPLE_RATE / freq)`
+   with white noise scaled by `velocity / 127.0`, drawn from `EngineState.rng`
+   to preserve seed determinism (FR-2).
+2. Each output sample: `y = 0.5 * (buf[pos % N] + buf[(pos - 1) % N])`,
+   writing the result back into the delay line at `pos % N`.
+3. Apply a fractional-delay tuning correction when `SAMPLE_RATE / freq` is not
+   an integer, keeping pitch within 5 cents of true pitch across all registers.
+4. The attack transient is a brief noise burst at note-start with amplitude
+   `ATTACK_SCALE ≥ 2× sustain level`, prepended before the KS loop takes over.
+5. Lower notes use an extended KS stretch factor (occasionally skip the averaging
+   step) to model the slower decay of bass strings. The per-register
+   `NOTE_DECAY_FACTOR` values are determined during implementation and tuned by ear.
 
-**Option B — Physical modelling (Karplus-Strong)**
-Initialise a delay line with noise or an impulse, then apply a low-pass
-averaging filter each sample. The resonant decay naturally produces harmonic
-content. More physically realistic. Slightly more complex to implement.
+`synthesise_note` returns a float32 array whose length is the full natural decay
+of the note (not one step). The note accumulator in `# --- NOTE ACCUMULATOR ---`
+(§3.3) mixes the next `samples_per_step` samples from all ringing notes each step.
 
 ### 2.6 Mixer and Output
 
@@ -368,8 +389,18 @@ musical dynamics. The velocity model has three layers:
 The three layers are combined multiplicatively. The result is clamped to
 [20, 110] to prevent inaudible notes and distortion.
 
-*(The exact weights for each layer are TBD pending ADR-U-0003 — the
-composition model determines which layer is most musically significant.)*
+The layers are combined as (decided in ADR-U-0003):
+
+```python
+v_struct = {0: 90, 4: 75, 8: 75, 12: 75}.get(step_in_bar, 60)
+v_phrase = int(20 * (step_in_phrase / max(phrase_length - 1, 1)))
+           if midi_note >= phrase_high_note else 0
+v_noise  = rng.randint(-10, 10)
+velocity = clamp(v_struct + v_phrase + v_noise, VELOCITY_MIN, VELOCITY_MAX)
+```
+
+`v_struct` provides the downbeat accent; `v_phrase` rises toward the phrase
+climax (highest note); `v_noise` prevents mechanical uniformity.
 
 ---
 
@@ -431,14 +462,25 @@ with `# ---` dividers, in this order:
 # --- CLI ARGUMENT PARSER ---
 # --- CONFIGURATION & TIME SCALING ---
 # --- MUSIC THEORY: MOODS & CHORDS ---
-# --- GENERATIVE ENGINE ---          (TBD: CA / Markov / rule-based per ADR-U-0003)
-# --- PIANO SYNTHESISER ---          (TBD: additive / Karplus-Strong per ADR-U-0002)
+# --- GENERATIVE ENGINE ---          (CA-gated rule-based hybrid; ADR-U-0003)
+# --- PIANO SYNTHESISER ---          (Karplus-Strong physical modelling; ADR-U-0002)
+# --- NOTE ACCUMULATOR ---           (active note buffer; see note below)
 # --- MIXER ---
 # --- VELOCITY MODEL ---
 # --- MIDI RECORDER ---
 # --- TERMINAL VISUALISER ---
 # --- MAIN LOOP ---
 ```
+
+**Note on the note accumulator:** `synthesise_note` returns a waveform whose length
+is determined by the note's natural decay, not by the step duration. For example, a
+bass note at BPM 72 has a step duration of ~104 ms, but the Karplus-Strong decay may
+sustain for 800 ms or more. The accumulator holds all currently ringing notes as
+`(waveform, read_position)` pairs. Each step, the mixer sums the next
+`samples_per_step` samples from every active note, advances the read positions, and
+discards notes that have been fully consumed. This decouples the note synthesis
+length from the step clock and allows natural overlapping decay, which is essential
+for a realistic piano texture.
 
 ### 3.4 Key Constants
 
@@ -456,7 +498,10 @@ with `# ---` dividers, in this order:
 | `MAX_MELODY_INTERVAL` | `7` | Semitones; max step-to-step interval in melody |
 | `VELOCITY_MIN` | `20` | MIDI velocity floor |
 | `VELOCITY_MAX` | `110` | MIDI velocity ceiling |
-| `NOTE_DECAY_FACTOR` | TBD | Decay rate per register — ADR-U-0002 |
+| `NOTE_DECAY_FACTOR` | tuned per register | KS stretch factor; lower notes use a higher value (slower decay); exact values determined by ear during implementation (ADR-U-0002) |
+| `CHORD_DURATION_BARS` | `2` | Chord changes every 2 bars (32 steps); decided in ADR-U-0003 |
+| `CA_WIDTH` | `32` | Cells in the CA row; decided in ADR-U-0003 |
+| `MIN_PHRASE_BARS` | `4` | Minimum bars before a phrase boundary can fire; prevents erratic phrase resets |
 | `FADE_OUT_BARS` | `4` | Fixed fade-out duration for DJ crossfade |
 
 ### 3.5 Function Signatures
@@ -524,10 +569,13 @@ def compute_velocity(
     phrase_length: int,
     midi_note: int,
     phrase_high_note: int,
+    rng: random.Random,
 ) -> int:
     """
     Compute MIDI velocity (20–110) for a note event.
     Combines structural accent, phrase shape, and generative variation.
+    rng is the seeded RNG from EngineState — caller passes it so that
+    the ±10 noise perturbation (layer 3) is deterministic from the seed.
     """
 
 # --- MIXER ---
@@ -560,6 +608,7 @@ stable regardless of this choice.
 | `sys` | `sys.stdout`, `sys.stderr`, `sys.exit` |
 | `random` | Seeded pseudo-random number generation |
 | `math` | `math.floor`, `math.exp`, `math.pi` |
+| `hashlib` | `hashlib.md5` — deterministic tonic derivation from seed string (ADR-U-0003); stdlib, no new package |
 
 No other dependencies. The script must be runnable with:
 ```bash
@@ -589,21 +638,21 @@ following are the primary observable criteria referenced in §1:
 
 ### 3.8 Open Questions and TBD Items
 
-The following items remain open and will be resolved by ADRs or during
-Phase 1 requirements authoring. Each blocks a specific part of the spec.
+Items resolved by ADR or spec update in Session 2 are marked ✓.
+Remaining open items require implementation-phase decisions.
 
-| Item | Blocks | Resolution path |
+| Item | Blocks | Status |
 | --- | --- | --- |
-| MIDI target hardware (DOS) | §2.7, FR-16, FR-17, FR-18 | ADR-U-0001 |
-| Piano synthesis approach | §2.5, §3.5 `synthesise_note`, NFR-7 | ADR-U-0002 |
-| Composition model | §2.3, §2.4, §2.11, §3.5 `EngineState` | ADR-U-0003 |
-| Chord progressions per mood | §2.3 mood table | After ADR-U-0003 |
-| Accompaniment pattern selection per mood | §2.4 left-hand section | After ADR-U-0003 |
-| Stereo vs mono output | §2.6, §3.4 `SAMPLE_RATE` channels | Phase 1 discussion |
-| DJ discovery (`ca_synth*.py` glob) | §2.8 note | Phase 1 or separate DJ change |
-| `NOTE_DECAY_FACTOR` per register | §3.4 constants table | After ADR-U-0002 |
-| `CHORD_DURATION_BARS` value | §2.2 time model | After ADR-U-0003 |
-| `drive` constant for soft-clip | §2.6 mixer | Implementation phase |
-| Tonic selection strategy | §2.3 mood definitions | After ADR-U-0003 |
-| Velocity layer weights | §2.11 velocity model | After ADR-U-0003 |
-| Python coding standard | §1.4 constraints | Deferred |
+| MIDI target hardware (DOS) | §2.7, FR-16, FR-17, FR-18 | ✓ ADR-U-0001: General MIDI |
+| Piano synthesis approach | §2.5, §3.5 `synthesise_note`, NFR-7 | ✓ ADR-U-0002: Karplus-Strong |
+| Composition model | §2.3, §2.4, §2.11, §3.5 `EngineState` | ✓ ADR-U-0003: CA-gated rule-based hybrid |
+| Chord progressions per mood | §2.3 mood table | ✓ Defined in §2.3 and ADR-U-0003 |
+| Accompaniment pattern per mood | §2.4 left-hand section | ✓ Defined in §2.4 and ADR-U-0003 |
+| `CHORD_DURATION_BARS` value | §2.2 time model | ✓ 2 bars (ADR-U-0003) |
+| Tonic selection strategy | §2.3 mood definitions | ✓ MD5 hash of seed string (ADR-U-0003) |
+| Velocity layer weights | §2.11 velocity model | ✓ Defined in §2.11 (ADR-U-0003) |
+| `NOTE_DECAY_FACTOR` per register | §3.4 constants table | Open — tuned by ear during implementation |
+| `drive` constant for soft-clip | §2.6 mixer | Open — tuned during implementation |
+| Stereo vs mono output | §2.6, §3.4 channels | Open — mono for now; stereo deferred |
+| DJ discovery (`ca_synth*.py` glob) | §2.8 note | Open — symlink `ca_synth_piano.py` is the simplest fix; deferred to integration phase |
+| Python coding standard | §1.4 constraints | ✓ [docs/standards/python-standards.md](../../../../docs/standards/python-standards.md) |
