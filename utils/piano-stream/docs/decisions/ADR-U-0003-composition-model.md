@@ -92,7 +92,9 @@ class EngineState:
 **Chord progressions per mood:**
 
 All progressions are in 4/4 time and cycle every `CHORD_DURATION_BARS = 2` bars
-(8 bars per full cycle). Root note is derived from the seed: `root = 48 + (hash(seed) % 12)`,
+(8 bars per full cycle). Root note is derived from the seed using MD5 for
+cross-platform stability (see Tonic selection strategy below):
+`root = 48 + (int(hashlib.md5(seed.encode()).hexdigest(), 16) % 12)`,
 clamped to the accompaniment register.
 
 | Mood | Progression (Roman numerals, major unless noted) |

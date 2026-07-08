@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 2026-07-07 | Initial draft | Session 1 |
 | 2026-07-08 | Resolve all TBD items; fix FR-11, FR-7, `compute_velocity`, buffer model, DJ discovery | Session 2 |
+| 2026-07-08 | Consistency audit fixes: FR-13 wording, `synthesise_note` rng param, `EngineState` concrete definition, RST docstrings in §3.5, add `ATTACK_SCALE`/`REST_PROBABILITY`/`PHRASE_SHORT`/`PHRASE_LONG` constants, add `logging`/`dataclasses` to §3.6 | Session 3 |
 
 ---
 
@@ -37,7 +38,7 @@
 | FR-10 | The script SHALL respond to a `fade_<pid>.flag` file written by the DJ script by triggering a graceful fade-out and clean exit, compatible with `stream_dj.py` IPC protocol. |
 | FR-11 | The script SHALL display a terminal visualiser once per bar showing the current chord, active voices, and a representation of the generative state. Output per step would flood the terminal; bar-level granularity is sufficient for monitoring. |
 | FR-12 | The script SHALL generate a left-hand accompaniment part and a right-hand melody part, kept in separate pitch registers, mixed into a single mono or stereo audio stream. |
-| FR-13 | The melody voice SHALL move predominantly by stepwise motion (intervals of a second or third), with occasional larger leaps resolved by contrary motion. |
+| FR-13 | The melody voice SHALL move predominantly by conjunct motion, with consecutive notes no more than a perfect fifth (7 semitones, `MAX_MELODY_INTERVAL`) apart. Larger leaps up to one octave are permitted at phrase boundaries only, and must be resolved by stepwise contrary motion on the following note. |
 | FR-14 | The bass / accompaniment voice SHALL place at least one note per bar on the downbeat, in a register at least one octave below the melody. |
 | FR-15 | The script SHALL apply dynamic variation: individual notes SHALL vary in velocity (loudness) to avoid a mechanical, uniform sound. |
 | FR-16 | The MIDI export SHALL assign General MIDI program 0 (Acoustic Grand Piano) to all melodic and bass channels via a program-change message at the start of each channel. |
@@ -499,9 +500,13 @@ for a realistic piano texture.
 | `VELOCITY_MIN` | `20` | MIDI velocity floor |
 | `VELOCITY_MAX` | `110` | MIDI velocity ceiling |
 | `NOTE_DECAY_FACTOR` | tuned per register | KS stretch factor; lower notes use a higher value (slower decay); exact values determined by ear during implementation (ADR-U-0002) |
+| `ATTACK_SCALE` | TBD ≥ 2.0 | Amplitude multiplier for the KS noise-burst attack transient; must be at least 2× the sustain amplitude (§2.5 requirement 1); tuned during implementation |
 | `CHORD_DURATION_BARS` | `2` | Chord changes every 2 bars (32 steps); decided in ADR-U-0003 |
 | `CA_WIDTH` | `32` | Cells in the CA row; decided in ADR-U-0003 |
 | `MIN_PHRASE_BARS` | `4` | Minimum bars before a phrase boundary can fire; prevents erratic phrase resets |
+| `PHRASE_SHORT` | `64` | Short phrase length in steps (4 bars × 16 steps) |
+| `PHRASE_LONG` | `128` | Long phrase length in steps (8 bars × 16 steps) |
+| `REST_PROBABILITY` | `0.20` | Default probability of a melody rest on any given step (§2.4) |
 | `FADE_OUT_BARS` | `4` | Fixed fade-out duration for DJ crossfade |
 
 ### 3.5 Function Signatures
@@ -515,14 +520,25 @@ functions. All functions are module-level (no class).
 def initialise_engine(seed: str) -> EngineState:
     """
     Initialise the generative engine state from a text seed.
-    Returns an opaque EngineState object used by all subsequent calls.
-    The internal representation depends on ADR-U-0003.
+
+    Seeds the CA row and the EngineState.rng from seed so that all
+    subsequent output is deterministic (FR-2). Phrase counters and
+    melody history are reset to their start-of-run values.
+
+    :param seed: Text seed string (from --seed CLI argument).
+    :returns:    A fully initialised EngineState ready for the main loop.
     """
 
 def advance_engine(state: EngineState) -> EngineState:
     """
-    Advance the engine by one step and return the new state.
-    Called once per step in the main loop.
+    Advance the generative engine by one step and return the new state.
+
+    Applies the Wolfram CA rule to state.ca_row, increments step and
+    phrase_step, and fires a phrase boundary if the CA and MIN_PHRASE_BARS
+    conditions are met. Called exactly once per step in the main loop.
+
+    :param state: Current engine state.
+    :returns:     New engine state with ca_row, step, and phrase counters updated.
     """
 
 def select_melody_note(
@@ -533,8 +549,21 @@ def select_melody_note(
 ) -> int | None:
     """
     Select the melody note for the current step.
-    Returns a MIDI note number, or None for a rest.
-    Enforces MAX_MELODY_INTERVAL constraint against prev_note.
+
+    Reads the melody gate from state.ca_row. If the gate is open, chooses
+    a chord tone within MAX_MELODY_INTERVAL semitones of prev_note. At a
+    phrase boundary, a leap of up to one octave is permitted; the following
+    call must then return a note in the opposite direction by step (the
+    caller enforces this via prev_note on the next invocation).
+
+    Returns None when the gate is closed (rest) or when REST_PROBABILITY
+    fires, which the caller should treat as silence for this step.
+
+    :param state:       Current engine state (ca_row and rng are read).
+    :param chord:       MIDI note numbers of the current chord.
+    :param prev_note:   Last melody note played, or None at phrase start.
+    :param step_in_bar: 0-based step index within the current bar (0–15).
+    :returns:           MIDI note number in [MELODY_LOW, MELODY_HIGH], or None.
     """
 
 def select_accomp_notes(
@@ -545,7 +574,19 @@ def select_accomp_notes(
 ) -> list[int]:
     """
     Select accompaniment notes for the current step.
-    Returns a list of MIDI note numbers (may be empty for rests within pattern).
+
+    Returns the notes dictated by the active accompaniment pattern at this
+    step position. Beat 1 (step_in_bar == 0) always returns at least the
+    bass root note regardless of pattern or CA gate, satisfying FR-14.
+
+    All returned notes are within [ACCOMP_LOW, ACCOMP_HIGH) and at least
+    2 semitones below the lowest melody note for this step.
+
+    :param state:       Current engine state (ca_row is read for non-downbeat gates).
+    :param chord:       MIDI note numbers of the current chord.
+    :param step_in_bar: 0-based step index within the current bar (0–15).
+    :param pattern:     Accompaniment pattern name (e.g. ``'alberti'``, ``'stride'``).
+    :returns:           List of MIDI note numbers; may be empty on pattern rests.
     """
 
 # --- PIANO SYNTHESISER ---
@@ -554,11 +595,27 @@ def synthesise_note(
     midi_note: int,
     duration: float,
     velocity: float,
+    rng: random.Random,
 ) -> np.ndarray:
     """
-    Synthesise a single piano note.
-    Returns a float32 numpy array of length int(SAMPLE_RATE * duration).
-    Implementation determined by ADR-U-0002.
+    Synthesise a single piano note using Karplus-Strong physical modelling.
+
+    The Karplus-Strong delay line is initialised with noise drawn from rng
+    so that output is deterministic from the seed (FR-2). rng must be the
+    same seeded instance carried in EngineState — callers must not pass
+    a freshly constructed Random().
+
+    Returns a float32 numpy array whose length equals the note's full natural
+    decay (longer than one step). The note accumulator (§3.3) is responsible
+    for slicing this array into per-step chunks.
+
+    :param midi_note: MIDI note number (21–108).
+    :param duration:  Maximum render duration in seconds; the array length is
+                      int(SAMPLE_RATE * duration).
+    :param velocity:  Normalised amplitude scalar (0.0–1.0), derived from
+                      compute_velocity() divided by VELOCITY_MAX.
+    :param rng:       Seeded RNG from EngineState for deterministic noise init.
+    :returns:         float32 numpy array of audio samples.
     """
 
 # --- VELOCITY MODEL ---
@@ -572,27 +629,61 @@ def compute_velocity(
     rng: random.Random,
 ) -> int:
     """
-    Compute MIDI velocity (20–110) for a note event.
-    Combines structural accent, phrase shape, and generative variation.
-    rng is the seeded RNG from EngineState — caller passes it so that
-    the ±10 noise perturbation (layer 3) is deterministic from the seed.
+    Compute MIDI velocity for a note event using the three-layer model (§2.11).
+
+    Layer 1 (structural accent): beat 1 → 90, beats 2/3/4 → 75, sub-beats → 60.
+    Layer 2 (phrase shape): rises 0–20 toward the phrase climax (highest note).
+    Layer 3 (noise): rng.randint(-10, 10) for organic variation.
+    Result is clamped to [VELOCITY_MIN, VELOCITY_MAX].
+
+    :param step_in_bar:    0-based step index within the bar (0–15).
+    :param step_in_phrase: 0-based step index within the current phrase.
+    :param phrase_length:  Total phrase length in steps (PHRASE_SHORT or PHRASE_LONG).
+    :param midi_note:      MIDI note number being played (used for phrase-shape layer).
+    :param phrase_high_note: Highest MIDI note heard so far in this phrase.
+    :param rng:            Seeded RNG from EngineState for deterministic variation.
+    :returns:              Integer MIDI velocity in [VELOCITY_MIN, VELOCITY_MAX].
     """
 
 # --- MIXER ---
 
 def mix_and_limit(buffers: list[np.ndarray], master_vol: float) -> np.ndarray:
     """
-    Sum audio buffers, apply soft-clip limiter, apply master volume.
-    Returns a float32 array suitable for writing to the output stream.
+    Sum active note buffers, apply soft-clip limiter, and scale by master volume.
+
+    The soft-clip formula ``np.tanh(mixed * drive) / drive`` prevents hard
+    clipping when multiple voices overlap. master_vol incorporates fade-in
+    and fade-out envelopes and is applied after the limiter.
+
+    :param buffers:    List of float32 arrays, each exactly samples_per_step long,
+                       representing one step's contribution from each active note.
+    :param master_vol: Current master volume scalar (0.0–1.0).
+    :returns:          float32 array of length samples_per_step, ready for
+                       ``sounddevice.OutputStream.write()``.
     """
 ```
 
-**Note on `EngineState`:** The type and structure of `EngineState` is
-intentionally left abstract here. It will be defined concretely once
-ADR-U-0003 decides the composition model. If CA-based, it is a numpy
-integer array. If Markov-based, it is a dictionary of transition state.
-If rule-based, it may be a dataclass. The function signatures above are
-stable regardless of this choice.
+**`EngineState` — concrete definition** (decided in ADR-U-0003):
+
+```python
+from dataclasses import dataclass
+import numpy as np
+import random
+
+@dataclass
+class EngineState:
+    ca_row: np.ndarray       # shape (CA_WIDTH,), dtype int; current CA row
+    step: int                # global step counter (0-indexed)
+    prev_melody_note: int | None  # last melody note played; None at start
+    phrase_step: int         # steps elapsed in the current phrase (0-indexed)
+    phrase_length: int       # phrase length in steps (PHRASE_SHORT or PHRASE_LONG)
+    phrase_high_note: int    # highest melody note seen this phrase (velocity shaping)
+    rng: random.Random       # seeded RNG instance; initialised from --seed
+```
+
+All function signatures above are stable regardless of the internal representation.
+The `rng` field is the sole source of randomness in the script — it must be
+initialised once from `--seed` and never replaced.
 
 ### 3.6 Dependency Constraints
 
@@ -609,6 +700,8 @@ stable regardless of this choice.
 | `random` | Seeded pseudo-random number generation |
 | `math` | `math.floor`, `math.exp`, `math.pi` |
 | `hashlib` | `hashlib.md5` — deterministic tonic derivation from seed string (ADR-U-0003); stdlib, no new package |
+| `logging` | Structured log output per python-standards.md §5; stdlib, no new package |
+| `dataclasses` | `@dataclass` decorator for `EngineState`; stdlib, no new package |
 
 No other dependencies. The script must be runnable with:
 ```bash
@@ -638,7 +731,8 @@ following are the primary observable criteria referenced in §1:
 
 ### 3.8 Open Questions and TBD Items
 
-Items resolved by ADR or spec update in Session 2 are marked ✓.
+Items resolved by ADR or spec update in Session 2 are marked ✓. Items
+resolved in Session 3 (consistency audit) are also marked ✓.
 Remaining open items require implementation-phase decisions.
 
 | Item | Blocks | Status |
@@ -652,6 +746,7 @@ Remaining open items require implementation-phase decisions.
 | Tonic selection strategy | §2.3 mood definitions | ✓ MD5 hash of seed string (ADR-U-0003) |
 | Velocity layer weights | §2.11 velocity model | ✓ Defined in §2.11 (ADR-U-0003) |
 | `NOTE_DECAY_FACTOR` per register | §3.4 constants table | Open — tuned by ear during implementation |
+| `ATTACK_SCALE` value | §2.5, §3.4 constants table | Open — must be ≥ 2× sustain; tuned during implementation |
 | `drive` constant for soft-clip | §2.6 mixer | Open — tuned during implementation |
 | Stereo vs mono output | §2.6, §3.4 channels | Open — mono for now; stereo deferred |
 | DJ discovery (`ca_synth*.py` glob) | §2.8 note | Open — symlink `ca_synth_piano.py` is the simplest fix; deferred to integration phase |
