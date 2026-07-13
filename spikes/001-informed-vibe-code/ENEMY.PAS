@@ -7,7 +7,7 @@ unit Enemy;
 
 interface
 
-uses World, Screen;
+uses World;
 
 procedure MoveEnemies;
 procedure CheckCollision;
@@ -27,7 +27,6 @@ begin
       Enemies[I].DX := -Enemies[I].DX
     else
     begin
-      EraseTile(Enemies[I].X, Enemies[I].Y);
       Enemies[I].X := NX;
     end;
   end;

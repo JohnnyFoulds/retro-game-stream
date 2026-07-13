@@ -7,7 +7,7 @@ unit Player;
 
 interface
 
-uses World, Screen;
+uses World;
 
 procedure MovePlayer(DX, DY: Integer);
 procedure ApplyGravity;
@@ -31,7 +31,6 @@ begin
   { Horizontal: must be supported }
   if (DX <> 0) and not IsSupported(World.Player.X, World.Player.Y) then Exit;
 
-  EraseTile(World.Player.X, World.Player.Y);
   World.Player.X := NX;
   World.Player.Y := NY;
 
@@ -51,7 +50,6 @@ begin
   if IsLadder(World.Player.X, World.Player.Y)         then Exit;
   if not InBounds(World.Player.X, World.Player.Y + 1) then Exit;
   if IsSolid(World.Player.X, World.Player.Y + 1)      then Exit;
-  EraseTile(World.Player.X, World.Player.Y);
   World.Player.Y := World.Player.Y + 1;
 end;
 

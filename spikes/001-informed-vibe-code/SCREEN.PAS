@@ -15,6 +15,7 @@ const
 
 procedure InitScreen;
 procedure EraseTile(WX, WY: Integer);
+procedure EraseEntities;
 procedure DrawWorld;
 procedure DrawEntities;
 procedure DrawStatus;
@@ -63,6 +64,14 @@ begin
   for R := 1 to WORLD_H do
     for C := 1 to WORLD_W do
       EraseTile(C, R);
+end;
+
+procedure EraseEntities;
+var I: Integer;
+begin
+  for I := 1 to MAX_ENEMIES do
+    EraseTile(Enemies[I].X, Enemies[I].Y);
+  EraseTile(Player.X, Player.Y);
 end;
 
 procedure DrawEntities;

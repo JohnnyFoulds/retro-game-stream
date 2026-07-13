@@ -166,13 +166,17 @@ Any line containing `Error` or `Warning` means the build failed. Do not commit
 
 ## Step 5 — Run the game
 
-Create a second config (or reuse the same one without `exit`) to launch the EXE:
+Create a second config (or reuse the same one without `exit`) to launch the EXE.
+
+**DOSBox cannot run an EXE by full path from a different drive.** Switch drive and directory first, then run by name:
 
 ```ini
 [autoexec]
 mount c /Users/johannes/Downloads/turbo_pascal_701_fr
 mount d <absolute-host-path-to-project-root>
-D:\BUILD\<ENTRYPOINT>.EXE
+d:
+cd BUILD
+<ENTRYPOINT>.EXE
 ```
 
 Launch with:
@@ -209,7 +213,9 @@ exit
 ```dos
 mount c /Users/johannes/Downloads/turbo_pascal_701_fr
 mount d /Users/johannes/code/retro/retro-game-stream/spikes/001-informed-vibe-code
-D:\BUILD\CORPLADR.EXE
+d:
+cd BUILD
+CORPLADR.EXE
 ```
 
 ---

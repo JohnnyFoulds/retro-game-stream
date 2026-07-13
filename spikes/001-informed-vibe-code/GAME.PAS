@@ -52,6 +52,7 @@ begin
         end;
     end;
 
+    EraseEntities;
     UpdateGame(DX, DY);
 
     DrawEntities;
