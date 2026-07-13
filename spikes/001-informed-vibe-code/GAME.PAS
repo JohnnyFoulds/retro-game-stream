@@ -11,7 +11,7 @@ procedure RunGame;
 
 implementation
 
-uses Crt, World, PlayerUnit, EnemyUnit, Screen;
+uses Crt, World, Player, Enemy, Screen;
 
 const
   TICK_ENEMY = 2;
@@ -23,9 +23,9 @@ var
 
 procedure CheckExit;
 begin
-  if (World.TileAt(Player.X, Player.Y) = CH_EXIT) and (Dollars = 0) then
+  if (TileAt(World.Player.X, World.Player.Y) = CH_EXIT) and (Dollars = 0) then
   begin
-    Inc(Player.Score, 100);
+    Inc(World.Player.Score, 100);
     Won := True;
   end;
 end;

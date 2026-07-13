@@ -1,0 +1,10 @@
+*/build/*.EXE
+*/build/*.TPU
+*/build/*.MAP
+*/build/*.OBJ
+*/build/*.BAK
+*.EXE
+*.TPU
+*.MAP
+*.OBJ
+*.BAK

@@ -3,7 +3,7 @@
   file, You can obtain one at https://mozilla.org/MPL/2.0/.
   Source: https://github.com/JohnnyFoulds/retro-game-stream }
 
-unit PlayerUnit;
+unit Player;
 
 interface
 
@@ -17,28 +17,28 @@ implementation
 procedure MovePlayer(DX, DY: Integer);
 var NX, NY: Integer;
 begin
-  NX := Player.X + DX;
-  NY := Player.Y + DY;
+  NX := World.Player.X + DX;
+  NY := World.Player.Y + DY;
 
   if not InBounds(NX, NY)   then Exit;
   if not IsPassable(NX, NY) then Exit;
 
   { Vertical: must be on a ladder to climb up, or entering a ladder to go down }
-  if (DY < 0) and not IsLadder(Player.X, Player.Y) then Exit;
-  if (DY > 0) and not IsLadder(Player.X, NY)
-              and not IsLadder(Player.X, Player.Y)  then Exit;
+  if (DY < 0) and not IsLadder(World.Player.X, World.Player.Y) then Exit;
+  if (DY > 0) and not IsLadder(World.Player.X, NY)
+              and not IsLadder(World.Player.X, World.Player.Y)  then Exit;
 
   { Horizontal: must be supported }
-  if (DX <> 0) and not IsSupported(Player.X, Player.Y) then Exit;
+  if (DX <> 0) and not IsSupported(World.Player.X, World.Player.Y) then Exit;
 
-  Player.X := NX;
-  Player.Y := NY;
+  World.Player.X := NX;
+  World.Player.Y := NY;
 
   { Collect dollar }
   if TileAt(NX, NY) = CH_DOLLAR then
   begin
     SetTile(NX, NY, CH_EMPTY);
-    Inc(Player.Score, 10);
+    Inc(World.Player.Score, 10);
     Dec(Dollars);
   end;
 
@@ -47,10 +47,10 @@ end;
 
 procedure ApplyGravity;
 begin
-  if IsLadder(Player.X, Player.Y)         then Exit;
-  if not InBounds(Player.X, Player.Y + 1) then Exit;
-  if IsSolid(Player.X, Player.Y + 1)      then Exit;
-  Player.Y := Player.Y + 1;
+  if IsLadder(World.Player.X, World.Player.Y)         then Exit;
+  if not InBounds(World.Player.X, World.Player.Y + 1) then Exit;
+  if IsSolid(World.Player.X, World.Player.Y + 1)      then Exit;
+  World.Player.Y := World.Player.Y + 1;
 end;
 
 end.

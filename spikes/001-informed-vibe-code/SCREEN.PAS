@@ -40,7 +40,6 @@ procedure InitScreen;
 begin
   ClrScr;
   TextBackground(Black);
-  CursorOff;
 end;
 
 procedure DrawTile(WX, WY: Integer);

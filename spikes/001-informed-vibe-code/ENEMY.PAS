@@ -3,7 +3,7 @@
   file, You can obtain one at https://mozilla.org/MPL/2.0/.
   Source: https://github.com/JohnnyFoulds/retro-game-stream }
 
-unit EnemyUnit;
+unit Enemy;
 
 interface
 

@@ -11,5 +11,4 @@ begin
   RunGame;
   ClrScr;
   TextColor(LightGray);
-  CursorOn;
 end.
