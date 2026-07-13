@@ -3,6 +3,7 @@
 */build/*.MAP
 */build/*.OBJ
 */build/*.BAK
+*/build/*.TXT
 *.EXE
 *.TPU
 *.MAP
