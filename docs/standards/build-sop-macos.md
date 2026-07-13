@@ -75,7 +75,8 @@ mount c /Users/johannes/Downloads/turbo_pascal_701_fr
 mount d <absolute-host-path-to-project-root>
 c:
 set PATH=%PATH%;C:\BIN
-TPC.EXE D:\<ENTRYPOINT>.PAS /UD:\;C:\UNITS /B /OD:\BUILD\
+md D:\BUILD
+TPC.EXE D:\<ENTRYPOINT>.PAS /UD:\;C:\UNITS /B /OD:\BUILD\ > D:\BUILD\BUILD.LOG
 exit
 ```
 
@@ -88,6 +89,12 @@ Replace `<absolute-host-path-to-project-root>` and `<ENTRYPOINT>` for each proje
 | `/UD:\;C:\UNITS` | Unit search path: project root first, then TP7 extended units |
 | `/B` | Batch mode — non-interactive, exits on completion |
 | `/OD:\BUILD\` | Write EXE, TPU, MAP output to `D:\BUILD\` |
+
+The `md D:\BUILD` line ensures the output directory exists — TPC drops output
+silently to the source root if the `/O` directory is missing.
+
+The `> D:\BUILD\BUILD.LOG` redirect captures compiler output so it can be read
+on the host after DOSBox closes.
 
 The original `TPC.CFG` hard-codes `/UD:\TP\UNITS` (a phantom DOS path). The `/U`
 flag on the command line **overrides** it entirely — no need to edit `TPC.CFG`.
@@ -167,7 +174,8 @@ mount c /Users/johannes/Downloads/turbo_pascal_701_fr
 mount d /Users/johannes/code/retro/retro-game-stream/spikes/001-informed-vibe-code
 c:
 set PATH=%PATH%;C:\BIN
-TPC.EXE D:\CORPLADR.PAS /UD:\;C:\UNITS /B /OD:\BUILD\
+md D:\BUILD
+TPC.EXE D:\CORPLADR.PAS /UD:\;C:\UNITS /B /OD:\BUILD\ > D:\BUILD\BUILD.LOG
 exit
 ```
 
@@ -193,15 +201,30 @@ TPC compiles units on demand and caches `.TPU` files in the output directory
 
 ---
 
+## TP7 language constraints (confirmed from spike)
+
+These are **not** bugs in the code — they are TP7 language rules that differ from
+Delphi and modern Pascal. Violating any of these produces `Error 3: Unknown identifier`.
+
+| Rule | Detail |
+| --- | --- |
+| Unit name must match filename | `unit Player` → file must be `PLAYER.PAS`. TPC looks up units by filename, not by the `unit` keyword. |
+| Unit name clashing with an exported variable | If `World` exports `var Player: TPlayer` and you `uses Player` (a unit), TP7 resolves bare `Player` as the unit identifier. Qualify all variable references as `World.Player.*` inside any unit that also `uses Player`. |
+| `CursorOff` / `CursorOn` do not exist | These are Delphi additions. Remove them or use a direct BIOS call via `Mem[$40:$60]`. |
+| Unit-qualified function calls not supported | `World.TileAt(x, y)` is invalid syntax. Just call `TileAt(x, y)` — it is in scope via `uses World`. Unit qualification works only for variables, not procedure/function calls. |
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `Unit not found: CRT` | `TURBO.TPL` not found by TPC | Ensure TPC is invoked from `C:\` where `BIN\TURBO.TPL` lives (the `c:` line in `[autoexec]` handles this) |
 | `Unit not found: WORLD` | Unit file not in search path | Confirm `D:\` is first in `/U` flag |
-| EXE missing after compile | `BUILD\` directory did not exist | Run `mkdir -p build` on host before launching DOSBox |
-| DOSBox window closes instantly | `exit` line runs before output is visible | Remove `exit` from `[autoexec]` to inspect compiler output |
+| EXE missing after compile — lands in source root | `BUILD\` directory did not exist when TPC ran | The `md D:\BUILD` line in `[autoexec]` prevents this; `md` on an existing directory is a no-op in DOS |
+| DOSBox window closes instantly before log is written | `exit` fires before TPC finishes | Remove `exit` from `[autoexec]` temporarily to confirm |
 | `Error 2` on TPC | File not found — wrong path or filename | DOS filenames are uppercase; check mount point and path |
+| `Error 3: Unknown identifier` on a unit name | Unit name / filename mismatch, or unit name clashes with a global variable | See TP7 language constraints table above |
 
 ---
 
