@@ -7,7 +7,7 @@ unit Enemy;
 
 interface
 
-uses World;
+uses World, Screen;
 
 procedure MoveEnemies;
 procedure CheckCollision;
@@ -26,7 +26,10 @@ begin
            and not IsLadder(NX, Enemies[I].Y)) then
       Enemies[I].DX := -Enemies[I].DX
     else
+    begin
+      EraseTile(Enemies[I].X, Enemies[I].Y);
       Enemies[I].X := NX;
+    end;
   end;
 end;
 

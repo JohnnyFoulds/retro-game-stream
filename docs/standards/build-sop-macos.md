@@ -105,16 +105,41 @@ flag on the command line **overrides** it entirely — no need to edit `TPC.CFG`
 
 ```bash
 /Applications/dosbox.app/Contents/MacOS/DOSBox \
-  -conf <project-root>/dosbox-build.conf
+  -conf <project-root>/dosbox-build.conf 2>/dev/null &
 ```
 
-A DOSBox window opens, runs the `[autoexec]` block, compiles, and exits. The
-compiled `.EXE` lands at `<project-root>/build/<ENTRYPOINT>.EXE` on the host.
+Run in the background (`&`) so the shell does not block. DOSBox runs the
+`[autoexec]` block, compiles, writes `BUILD.LOG`, and exits (via the `exit` line).
 
-Compiler output is printed to the DOSBox window before it closes. To capture it,
-remove the `exit` line from `[autoexec]` and read the terminal output manually,
-or add a `> D:\BUILD\BUILD.LOG` redirect to the TPC line (TP7 batch mode supports
-stdout redirect inside DOSBox).
+**Do not use `open -a dosbox` for the build** — the build config exits immediately
+after compiling, which confuses the macOS app lifecycle. The direct binary invocation
+works fine for headless batch builds.
+
+After DOSBox exits, read the log:
+
+```bash
+cat <project-root>/build/BUILD.LOG
+```
+
+### Verify EXE location
+
+The `md D:\BUILD` line in `[autoexec]` creates the output directory inside DOSBox.
+**Always verify where the EXE actually landed** — if `BUILD\` was not created
+successfully, TPC silently drops the EXE in the source root instead:
+
+```bash
+# Check expected location first
+ls <project-root>/build/*.EXE
+
+# If missing, check source root
+ls <project-root>/*.EXE
+```
+
+If the EXE is in the source root, move it:
+
+```bash
+mv <project-root>/<ENTRYPOINT>.EXE <project-root>/build/
+```
 
 ---
 

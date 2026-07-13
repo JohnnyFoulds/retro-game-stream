@@ -14,6 +14,7 @@ const
   OFS_Y = 1;
 
 procedure InitScreen;
+procedure EraseTile(WX, WY: Integer);
 procedure DrawWorld;
 procedure DrawEntities;
 procedure DrawStatus;
@@ -42,7 +43,7 @@ begin
   TextBackground(Black);
 end;
 
-procedure DrawTile(WX, WY: Integer);
+procedure EraseTile(WX, WY: Integer);
 var Ch: Char; Col: Byte;
 begin
   Ch := World.TileAt(WX, WY);
@@ -61,7 +62,7 @@ var R, C: Integer;
 begin
   for R := 1 to WORLD_H do
     for C := 1 to WORLD_W do
-      DrawTile(C, R);
+      EraseTile(C, R);
 end;
 
 procedure DrawEntities;

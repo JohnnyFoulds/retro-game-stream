@@ -1,0 +1,29 @@
+1..27
+ok 1 world has correct dimensions
+ok 2 floor row 22 is solid
+ok 3 InBounds edge cases
+ok 4 out-of-bounds tile returns wall
+ok 5 IsSolid correct
+ok 6 IsLadder correct
+ok 7 IsPassable correct
+ok 8 dollar count > 0 after init
+ok 9 SetTile and TileAt round-trip
+ok 10 player starts at spawn position
+ok 11 player starts with zero score
+ok 12 player starts with three lives
+ok 13 player moves right
+ok 14 player moves left
+ok 15 player blocked by platform
+ok 16 no horizontal move in air
+ok 17 player climbs up on ladder
+ok 18 player cannot climb up off ladder
+ok 19 player falls when unsupported
+ok 20 player rests on platform
+ok 21 no gravity on ladder
+ok 22 dollar collected on move into cell
+ok 23 no enemy on player spawn at init
+ok 24 all enemies in bounds at init
+ok 25 collision sets GameOver
+ok 26 no GameOver when enemies apart
+ok 27 enemy reverses at boundary
+# 27 passed, 0 failed of 27
