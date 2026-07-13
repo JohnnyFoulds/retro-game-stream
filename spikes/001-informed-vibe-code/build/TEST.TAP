@@ -22,9 +22,9 @@ ok 20 player rests on platform
 ok 21 no gravity on ladder
 ok 22 dollar collected on move into cell
 ok 23 gravity applies with no input
-ok 24 enemies do not move on no-input
-ok 25 enemies move after player input ticks
-ok 26 enemies only move every Nth input
+ok 24 enemies move without player input
+ok 25 enemies move after TICK_ENEMY iterations
+ok 26 enemies do not move before TICK_ENEMY ticks
 ok 27 no enemy on player spawn at init
 ok 28 all enemies in bounds at init
 ok 29 collision sets GameOver

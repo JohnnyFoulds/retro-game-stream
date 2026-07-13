@@ -333,45 +333,45 @@ begin
   AssertEqualInt('gravity applies with no input', StartY + 1, World.Player.Y);
 end;
 
-procedure Test_UpdateGame_EnemiesDoNotMoveWithNoInput;
-var I: Integer; Changed: Boolean;
+procedure Test_UpdateGame_EnemiesMoveWithNoInput;
+{ Real-time arcade rule: enemies advance on the global ticker regardless of
+  whether the player pressed a key. Drive TICK_ENEMY no-input ticks and
+  confirm enemy 1 has moved. }
+var X1: Integer; I: Integer;
 begin
   InitWorld;
-  Changed := False;
-  { Capture starting positions }
-  UpdateGame(0, 0);
-  { Enemies must not have moved — compare against InitWorld positions }
-  InitWorld;
-  for I := 1 to MAX_ENEMIES do
-    if Enemies[I].X <> Enemies[I].X then { re-init above resets to known coords }
-      Changed := True;
-  AssertFalse('enemies do not move on no-input update', Changed);
-end;
-
-procedure Test_UpdateGame_EnemiesMoveAfterPlayerInput;
-var X1: Integer;
-begin
-  InitWorld;
-  { Record enemy 1 starting X }
   X1 := Enemies[1].X;
-  { Drive enough ticks with input to guarantee enemy moves (TICK_ENEMY = 2) }
-  UpdateGame(1, 0);
-  UpdateGame(1, 0);
-  { Enemy 1 should have moved at least once — position differs OR direction flipped.
-    We assert enemy has been given the opportunity to move; since enemy 1 starts
-    moving right and has clear space, X should have advanced. }
-  AssertTrue('enemy moved after player input ticks',
+  for I := 1 to TICK_ENEMY do
+    UpdateGame(0, 0);
+  AssertTrue('enemies move without player input after TICK_ENEMY ticks',
     (Enemies[1].X <> X1) or (Enemies[1].DX = -1));
 end;
 
-procedure Test_UpdateGame_EnemiesOnlyMoveEveryNthInput;
-var X1: Integer;
+procedure Test_UpdateGame_EnemiesMoveAfterTickEnemyIterations;
+{ Ticker is unconditional: after exactly TICK_ENEMY iterations (input or not)
+  the enemy must have moved. }
+var X1: Integer; I: Integer;
 begin
   InitWorld;
   X1 := Enemies[1].X;
-  { One input tick — TICK_ENEMY = 2, so enemy must NOT have moved yet }
-  UpdateGame(1, 0);
-  AssertEqualInt('enemy has not moved after 1 input tick', X1, Enemies[1].X);
+  for I := 1 to TICK_ENEMY do
+    UpdateGame(1, 0);
+  AssertTrue('enemy moved after TICK_ENEMY input ticks',
+    (Enemies[1].X <> X1) or (Enemies[1].DX = -1));
+end;
+
+procedure Test_UpdateGame_EnemiesDoNotMoveBeforeTickEnemyIterations;
+{ Enemy must NOT have moved before the ticker fires.
+  TICK_ENEMY - 1 iterations must leave enemy position unchanged.
+  Tick is reset to 0 so prior tests do not pollute the counter. }
+var X1: Integer; I: Integer;
+begin
+  InitWorld;
+  Tick := 0;
+  X1 := Enemies[1].X;
+  for I := 1 to TICK_ENEMY - 1 do
+    UpdateGame(0, 0);
+  AssertEqualInt('enemy has not moved before TICK_ENEMY ticks', X1, Enemies[1].X);
 end;
 
 { -----------------------------------------------------------------------
@@ -412,10 +412,10 @@ begin
   RegisterTest('dollar collected on move into cell', Test_Dollar_CollectedOnMove);
 
   { Game loop }
-  RegisterTest('gravity applies with no input',         Test_UpdateGame_GravityAppliesWithNoInput);
-  RegisterTest('enemies do not move on no-input',       Test_UpdateGame_EnemiesDoNotMoveWithNoInput);
-  RegisterTest('enemies move after player input ticks', Test_UpdateGame_EnemiesMoveAfterPlayerInput);
-  RegisterTest('enemies only move every Nth input',     Test_UpdateGame_EnemiesOnlyMoveEveryNthInput);
+  RegisterTest('gravity applies with no input',              Test_UpdateGame_GravityAppliesWithNoInput);
+  RegisterTest('enemies move without player input',          Test_UpdateGame_EnemiesMoveWithNoInput);
+  RegisterTest('enemies move after TICK_ENEMY iterations',   Test_UpdateGame_EnemiesMoveAfterTickEnemyIterations);
+  RegisterTest('enemies do not move before TICK_ENEMY ticks',Test_UpdateGame_EnemiesDoNotMoveBeforeTickEnemyIterations);
 
   { Enemy }
   RegisterTest('no enemy on player spawn at init',  Test_Enemy_NoEnemyOnPlayerAtInit);

@@ -131,6 +131,8 @@ Specifying this before implementation is deliberate — even simple games have r
 
 **Jumping:** excluded from the one-day version. Ladders provide all vertical movement. Jumping is a post-course enhancement.
 
+**Enemy cadence:** enemies move on a real-time ticker independent of player input — this is an arcade platformer (Lode Runner lineage), not a roguelike. The ticker increments every game loop iteration regardless of whether the player pressed a key. Enemies advance one cell when `Tick mod TICK_ENEMY = 0`. The initial value is `TICK_ENEMY = 15` (≈ 300 ms at a 20 ms loop delay), giving the player time to react without removing time pressure. This value is a named constant and may be tuned without code changes beyond the constant.
+
 ---
 
 ## File structure (trial build)

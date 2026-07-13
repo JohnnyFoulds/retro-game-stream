@@ -23,15 +23,15 @@ interface
 uses World, Player, Enemy;
 
 const
-  TICK_ENEMY = 2;
+  TICK_ENEMY = 15;
+
+var
+  Tick: Integer;
 
 procedure UpdateGame(DX, DY: Integer);
 procedure CheckExit;
 
 implementation
-
-var
-  Tick: Integer;
 
 procedure CheckExit;
 begin
@@ -51,12 +51,10 @@ begin
   { Gravity always applies }
   ApplyGravity;
 
-  { Enemies only advance on player input ticks }
-  if (DX <> 0) or (DY <> 0) then
-  begin
-    Inc(Tick);
-    if Tick mod TICK_ENEMY = 0 then MoveEnemies;
-  end;
+  { Enemy ticker advances every loop iteration — real-time arcade cadence,
+    independent of player input (Lode Runner lineage, not roguelike). }
+  Inc(Tick);
+  if Tick mod TICK_ENEMY = 0 then MoveEnemies;
 
   CheckCollision;
   CheckExit;
