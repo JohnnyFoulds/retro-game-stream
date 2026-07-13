@@ -11,6 +11,7 @@ This file is the operating guide for AI assistance on this project. Read it befo
 | Architecture Decision Records | [docs/standards/adr.md](docs/standards/adr.md) |
 | Git and source control | [docs/standards/git-standard.md](docs/standards/git-standard.md) |
 | Pascal coding style | [docs/standards/coding-standards.md](docs/standards/coding-standards.md) |
+| Python coding style | [docs/standards/python-standards.md](docs/standards/python-standards.md) |
 | Inline documentation | [docs/standards/documentation-standards.md](docs/standards/documentation-standards.md) |
 | Error handling | [docs/standards/error-handling.md](docs/standards/error-handling.md) |
 | Logging | [docs/standards/logging-standard.md](docs/standards/logging-standard.md) |
@@ -112,18 +113,64 @@ The specification is always authoritative. The AI proposes; the human accepts or
 
 ## Agent operating protocol
 
-For any implementation task in this repository, follow this protocol:
+### TDD red/green discipline (mandatory)
+
+Every implementation step **must** follow TDD red/green order:
+
+1. **RED** — Write a failing test that exercises the acceptance criterion. Run the suite and confirm the new test fails (and no other tests break).
+2. **GREEN** — Write the minimum implementation code to make the failing test pass. Run the suite and confirm all tests pass.
+3. **Commit** — Commit only after the suite is green. The commit message must reference the test count.
+
+Do not write implementation code before writing the test. Do not move to the next requirement until all tests are green. There are no exceptions to this rule.
+
+---
+
+### For game implementation tasks
 
 1. Identify the requirement ID.
 2. Verify the requirement exists in the game's `docs/requirements.md`.
 3. Verify the relevant design contract exists in the game's `docs/technical-design.md`.
 4. Modify the **smallest necessary file set** — name them explicitly before starting.
 5. Make no changes outside the stated scope. Do not add features not in the current requirement.
-6. After code changes: run the build/test process (or describe what should be run).
-7. Show changed files and a diff summary.
-8. Update `docs/traceability-matrix.md`.
-9. Propose a commit message in the format above.
-10. Do not commit without explicit human approval.
+6. **Write the failing test first (RED).** Run the suite and confirm it fails.
+7. Implement the minimum code to make the test pass (GREEN). Run the suite and confirm all tests pass.
+8. Show changed files and a diff summary.
+9. Update `docs/traceability-matrix.md`.
+10. Propose a commit message in the format above.
+11. Do not commit without explicit human approval.
+
+### For utility implementation tasks (`utils/`)
+
+Follow the same protocol, substituting the utility's own SDD documents:
+
+1. Identify the requirement ID from `utils/<name>/docs/requirements.md`.
+2. Verify the design contract exists in `utils/<name>/docs/technical-design.md`.
+3. Utility ADRs live in `utils/<name>/docs/decisions/` and are numbered `ADR-U-NNNN`. They must never be placed in `docs/decisions/`, which is reserved for game and course decisions.
+4. Steps 4–11 are identical to the game protocol above (TDD red/green applies equally).
+
+### License headers
+
+Every new source file — Pascal (`.PAS`) or Python (`.py`) — must carry an MPL 2.0
+header as the first lines of the file.
+
+Python:
+
+```python
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Source: https://github.com/JohnnyFoulds/retro-game-stream
+```
+
+Pascal:
+
+```pascal
+{ This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  Source: https://github.com/JohnnyFoulds/retro-game-stream }
+```
 
 ### Never do the following
 
@@ -133,6 +180,9 @@ For any implementation task in this repository, follow this protocol:
 - Commit without review
 - Publish a broken build
 - Add game-specific details to this file or README — those belong in the game's brainstorm folder
+- Place utility ADRs in `docs/decisions/`
+- Create source files without the MPL 2.0 license header
+- Write implementation code before writing a failing test (violates TDD red/green)
 
 ---
 
@@ -142,10 +192,14 @@ For any implementation task in this repository, follow this protocol:
 retro-game-stream/
   README.md
   CLAUDE.md                        ← this file
+  LICENSE                          ← Mozilla Public License 2.0
   docs/
     brainstorm/                    ← design notes per game candidate
       corporate-ladder/            ← current target game design
-    decisions/                     ← Architecture Decision Records
+      utils/                       ← brainstorm notes for utility tools
+        stream-music/              ← generative CA music engine (prototype)
+        piano-stream/              ← SDD plan for piano stream utility
+    decisions/                     ← Architecture Decision Records (game + course only)
     standards/                     ← project standards
     course/                        ← instructor-facing course materials
   games/
@@ -153,7 +207,17 @@ retro-game-stream/
       build/                       ← build logs and manifest
       public/                      ← browser play page
       src/                         ← Pascal source files
-      src-baseline/                ← vibe-code baseline source (Module 0)
+      tests/                       ← acceptance tests
+    corporate-ladder-baseline/     ← vibe-code baseline source (Module 0)
+  spikes/
+    001-informed-vibe-code/        ← first informed spike (TP7 + DOSBox pipeline)
+      docs/                        ← spike-scoped notes and decisions
+      tests/                       ← TPTEST unit test suite
+      build/                       ← compiled output (not committed)
+  utils/
+    piano-stream/                  ← procedural grand piano music generator
+      docs/                        ← feature spec, requirements, ADRs
+        decisions/                 ← utility-scoped ADRs (ADR-U-NNNN)
       tests/                       ← acceptance tests
 ```
 

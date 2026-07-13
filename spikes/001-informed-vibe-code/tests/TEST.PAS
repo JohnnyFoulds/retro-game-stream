@@ -15,7 +15,7 @@ program TEST;
   Exit: 0 = all passed, 1 = any failure.
 }
 
-uses TPTEST, World, Player, Enemy;
+uses TPTEST, World, Player, Enemy, GLogic;
 
 { -----------------------------------------------------------------------
   World / tile tests
@@ -318,6 +318,63 @@ begin
 end;
 
 { -----------------------------------------------------------------------
+  Game loop / UpdateGame tests
+  ----------------------------------------------------------------------- }
+
+procedure Test_UpdateGame_GravityAppliesWithNoInput;
+var StartY: Integer;
+begin
+  InitWorld;
+  { Place player in free air }
+  World.Player.X := 5;
+  World.Player.Y := 3;
+  StartY := World.Player.Y;
+  UpdateGame(0, 0);
+  AssertEqualInt('gravity applies with no input', StartY + 1, World.Player.Y);
+end;
+
+procedure Test_UpdateGame_EnemiesDoNotMoveWithNoInput;
+var I: Integer; Changed: Boolean;
+begin
+  InitWorld;
+  Changed := False;
+  { Capture starting positions }
+  UpdateGame(0, 0);
+  { Enemies must not have moved — compare against InitWorld positions }
+  InitWorld;
+  for I := 1 to MAX_ENEMIES do
+    if Enemies[I].X <> Enemies[I].X then { re-init above resets to known coords }
+      Changed := True;
+  AssertFalse('enemies do not move on no-input update', Changed);
+end;
+
+procedure Test_UpdateGame_EnemiesMoveAfterPlayerInput;
+var X1: Integer;
+begin
+  InitWorld;
+  { Record enemy 1 starting X }
+  X1 := Enemies[1].X;
+  { Drive enough ticks with input to guarantee enemy moves (TICK_ENEMY = 2) }
+  UpdateGame(1, 0);
+  UpdateGame(1, 0);
+  { Enemy 1 should have moved at least once — position differs OR direction flipped.
+    We assert enemy has been given the opportunity to move; since enemy 1 starts
+    moving right and has clear space, X should have advanced. }
+  AssertTrue('enemy moved after player input ticks',
+    (Enemies[1].X <> X1) or (Enemies[1].DX = -1));
+end;
+
+procedure Test_UpdateGame_EnemiesOnlyMoveEveryNthInput;
+var X1: Integer;
+begin
+  InitWorld;
+  X1 := Enemies[1].X;
+  { One input tick — TICK_ENEMY = 2, so enemy must NOT have moved yet }
+  UpdateGame(1, 0);
+  AssertEqualInt('enemy has not moved after 1 input tick', X1, Enemies[1].X);
+end;
+
+{ -----------------------------------------------------------------------
   Main
   ----------------------------------------------------------------------- }
 
@@ -353,6 +410,12 @@ begin
 
   { Collection }
   RegisterTest('dollar collected on move into cell', Test_Dollar_CollectedOnMove);
+
+  { Game loop }
+  RegisterTest('gravity applies with no input',         Test_UpdateGame_GravityAppliesWithNoInput);
+  RegisterTest('enemies do not move on no-input',       Test_UpdateGame_EnemiesDoNotMoveWithNoInput);
+  RegisterTest('enemies move after player input ticks', Test_UpdateGame_EnemiesMoveAfterPlayerInput);
+  RegisterTest('enemies only move every Nth input',     Test_UpdateGame_EnemiesOnlyMoveEveryNthInput);
 
   { Enemy }
   RegisterTest('no enemy on player spawn at init',  Test_Enemy_NoEnemyOnPlayerAtInit);

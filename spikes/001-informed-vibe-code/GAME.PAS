@@ -11,24 +11,11 @@ procedure RunGame;
 
 implementation
 
-uses Crt, World, Player, Enemy, Screen;
-
-const
-  TICK_ENEMY = 2;
+uses Crt, World, GLogic, Screen;
 
 var
-  Tick : Integer;
-  Key  : Char;
+  Key    : Char;
   DX, DY : Integer;
-
-procedure CheckExit;
-begin
-  if (TileAt(World.Player.X, World.Player.Y) = CH_EXIT) and (Dollars = 0) then
-  begin
-    Inc(World.Player.Score, 100);
-    Won := True;
-  end;
-end;
 
 procedure RunGame;
 begin
@@ -38,8 +25,6 @@ begin
   DrawWorld;
   DrawEntities;
   DrawStatus;
-
-  Tick := 0;
 
   repeat
     DX := 0; DY := 0;
@@ -67,18 +52,7 @@ begin
         end;
     end;
 
-    { Update order: input → move → gravity → collect (in MovePlayer) →
-      enemy → collision → exit check → render }
-    if (DX <> 0) or (DY <> 0) then
-      MovePlayer(DX, DY);
-
-    ApplyGravity;
-
-    Inc(Tick);
-    if Tick mod TICK_ENEMY = 0 then MoveEnemies;
-
-    CheckCollision;
-    CheckExit;
+    UpdateGame(DX, DY);
 
     DrawEntities;
     DrawStatus;

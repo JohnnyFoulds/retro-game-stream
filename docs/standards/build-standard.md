@@ -117,7 +117,71 @@ games/corporate-ladder/build/*.BAK
 
 ---
 
-## 7. Development vs release builds
+## 7. Unit testing (TPTEST)
+
+All game logic units must have automated unit tests written with `TPTEST.PAS`, the project's TAP-producing test framework for Turbo Pascal 7.
+
+### Framework location
+
+```
+<game-or-spike-root>/
+  tests/
+    TPTEST.PAS     ← test runner unit (TAP output to TEST.TAP)
+    TEST.PAS       ← test program (uses TPTEST + game units)
+  build/
+    TEST.TAP       ← TAP output (not committed)
+    TEST-B.LOG     ← test build log (not committed)
+```
+
+### TDD protocol
+
+1. **RED** — Write a failing test in `TEST.PAS` that covers the acceptance criterion. Run the suite; confirm the new test fails.
+2. **GREEN** — Write the minimum implementation to pass the test. Run the suite; confirm all tests pass.
+3. **Commit** — Commit only when the suite is green. Include the test count in the commit message.
+
+Never write implementation code before writing a failing test.
+
+### Running tests (DOSBox / macOS)
+
+```bash
+# Clean prior outputs
+rm -f build/TEST* build/GLOGIC.TPU
+
+# Launch DOSBox headless with dosbox-test.conf
+/Applications/dosbox.app/Contents/MacOS/DOSBox \
+  -conf dosbox-test.conf 2>/dev/null &
+sleep 20
+
+# Inspect results
+cat build/TEST-B.LOG   # compiler output
+cat build/TEST.TAP     # TAP test results
+```
+
+`dosbox-test.conf` must:
+
+1. Pre-compile any logic units (e.g. `GLOGIC.PAS`) that `TEST.PAS` depends on, writing TPUs to `BUILD\`.
+2. Compile `TEST.PAS` with the unit search path including `BUILD\` and the game source root.
+3. Run `TEST.EXE` from the `BUILD\` directory (so `TEST.TAP` lands in `BUILD\`).
+
+### What "Tests: passed" means
+
+A commit may state `Tests: passed` only when `TEST.TAP` ends with:
+
+```
+# N passed, 0 failed of N
+```
+
+and the exit code from `TEST.EXE` is 0. Any failures must be resolved before committing.
+
+### Key TPTEST constraints
+
+- `{$F+}` (far calls) must appear in both `TPTEST.PAS` and `TEST.PAS` — required for procedural type compatibility across unit boundaries in TP7.
+- Test output is written via Pascal `Assign`/`Rewrite`/`Close` to `TEST.TAP` — **not** via shell redirect (DOSBox `>` redirect silently produces empty files for user programs).
+- `MAX_TESTS = 64` — increase if the suite grows beyond this limit.
+
+---
+
+## 8. Development vs release builds
 
 Two compiler configurations:
 
